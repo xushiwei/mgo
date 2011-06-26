@@ -318,7 +318,7 @@ func handleErr(err *os.Error) {
 		if _, ok := r.(runtime.Error); ok {
 			panic(r)
 		} else if s, ok := r.(string); ok {
-			*err = os.ErrorString(s)
+			*err = os.NewError(s)
 		} else if e, ok := r.(os.Error); ok {
 			*err = e
 		} else {
@@ -362,9 +362,9 @@ func Unmarshal(in []byte, out interface{}) (err os.Error) {
 		d := &decoder{in: in}
 		d.readDocTo(v)
 	case reflect.Struct:
-		return os.ErrorString("Unmarshal can't deal with struct values. Use a pointer.")
+		return os.NewError("Unmarshal can't deal with struct values. Use a pointer.")
 	default:
-		return os.ErrorString("Unmarshal needs a map or a pointer to a struct.")
+		return os.NewError("Unmarshal needs a map or a pointer to a struct.")
 	}
 	return nil
 }
@@ -387,7 +387,7 @@ func (raw Raw) Unmarshal(out interface{}) (err os.Error) {
 			return &TypeError{v.Type(), raw.Kind}
 		}
 	default:
-		return os.ErrorString("Raw Unmarshal needs a map or a valid pointer.")
+		return os.NewError("Raw Unmarshal needs a map or a valid pointer.")
 	}
 	return nil
 }
