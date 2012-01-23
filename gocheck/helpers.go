@@ -1,11 +1,10 @@
 package gocheck
 
-
 import (
 	"fmt"
 	"strings"
+	"time"
 )
-
 
 // -----------------------------------------------------------------------
 // Basic succeeding/failing logic.
@@ -70,7 +69,6 @@ func (c *C) Skip(reason string) {
 	c.stopNow()
 }
 
-
 // -----------------------------------------------------------------------
 // Basic logging.
 
@@ -89,6 +87,15 @@ func (c *C) Log(args ...interface{}) {
 // will be assembled together into a string using fmt.Sprintf().
 func (c *C) Logf(format string, args ...interface{}) {
 	c.logf(format, args...)
+}
+
+// Output enables *C to be used as a logger in functions that require only
+// the minimum interface of *log.Logger.
+func (c *C) Output(calldepth int, s string) error {
+	ns := time.Now().Sub(time.Time{}).Nanoseconds()
+	t := float64(ns%100e9) / 1e9
+	c.Logf("[LOG] %.05f %s", t, s)
+	return nil
 }
 
 // Log an error into the test error output, and mark the test as failed.
@@ -130,7 +137,6 @@ func (c *C) Fatalf(format string, args ...interface{}) {
 	c.logNewLine()
 	c.FailNow()
 }
-
 
 // -----------------------------------------------------------------------
 // Generic checks and assertions based on checkers.

@@ -11,8 +11,9 @@ import (
 	"strings"
 	"regexp"
 	"fmt"
+	"log"
+	"os"
 )
-
 
 // -----------------------------------------------------------------------
 // Foundation test suite.
@@ -150,7 +151,6 @@ func (s *FoundationS) TestFatalf(c *gocheck.C) {
 	c.Log("Fatalf() didn't stop the test")
 }
 
-
 func (s *FoundationS) TestCallerLoggingInsideTest(c *gocheck.C) {
 	log := fmt.Sprintf(""+
 		"foundation_test.go:%d:\n"+
@@ -254,7 +254,6 @@ func (s *FoundationS) TestExpectFailureSucceedVerbose(c *gocheck.C) {
 	c.Assert(result.ExpectedFailures, gocheck.Equals, 1)
 }
 
-
 // -----------------------------------------------------------------------
 // Skip() allows stopping a test without positive/negative results.
 
@@ -287,6 +286,28 @@ func (s *FoundationS) TestSkipVerbose(c *gocheck.C) {
 		c.Error("Bad expression: ", expected)
 	} else if !matched {
 		c.Error("Skip() didn't log properly:\n", output.value)
+	}
+}
+
+// -----------------------------------------------------------------------
+// Check minimum *log.Logger interface provided by *gocheck.C.
+
+type minLogger interface {
+	Output(calldepth int, s string) error
+}
+
+func (s *BootstrapS) TestMinLogger(c *gocheck.C) {
+	var logger minLogger
+	logger = log.New(os.Stderr, "", 0)
+	logger = c
+	logger.Output(0, "Hello there")
+	expected := "\\[LOG\\] [.0-9]+ Hello there\n"
+	output := c.GetTestLog()
+	matched, err := regexp.MatchString(expected, output)
+	if err != nil {
+		c.Error("Bad expression: ", expected)
+	} else if !matched {
+		c.Error("Output() didn't log properly:\n", output)
 	}
 }
 

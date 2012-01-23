@@ -1,104 +1,44 @@
 // mgo - MongoDB driver for Go
 // 
-// Copyright (c) 2010-2011 - Gustavo Niemeyer <gustavo@niemeyer.net>
+// Copyright (c) 2010-2012 - Gustavo Niemeyer <gustavo@niemeyer.net>
 // 
 // All rights reserved.
-// 
+//
 // Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are met:
+// modification, are permitted provided that the following conditions are met: 
 // 
-//     * Redistributions of source code must retain the above copyright notice,
-//       this list of conditions and the following disclaimer.
-//     * Redistributions in binary form must reproduce the above copyright notice,
-//       this list of conditions and the following disclaimer in the documentation
-//       and/or other materials provided with the distribution.
-//     * Neither the name of the copyright holder nor the names of its
-//       contributors may be used to endorse or promote products derived from
-//       this software without specific prior written permission.
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer. 
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution. 
 // 
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
-// CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-// EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-// PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-// LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-// NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+// ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+// WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
+// ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+// (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+// LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+// ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 package mgo_test
 
 import (
-	"launchpad.net/gobson/bson"
+	"errors"
 	. "launchpad.net/gocheck"
 	"launchpad.net/mgo"
-	"os"
+	"launchpad.net/mgo/bson"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
-// Connect to the master of a deployment with a single server,
-// run an insert, and then ensure the insert worked and that a
-// single connection was established.
-func (s *S) TestTopologySyncWithSingleMaster(c *C) {
-	// Use hostname here rather than IP, to make things trickier.
-	session, err := mgo.Mongo("localhost:40001")
-	c.Assert(err, IsNil)
-	defer session.Close()
-
-	coll := session.DB("mydb").C("mycoll")
-	err = coll.Insert(M{"a": 1, "b": 2})
-	c.Assert(err, IsNil)
-
-	// One connection used for discovery. Master socket recycled for
-	// insert. Socket is reserved after insert.
-	stats := mgo.GetStats()
-	c.Assert(stats.MasterConns, Equals, 1)
-	c.Assert(stats.SlaveConns, Equals, 0)
-	c.Assert(stats.SocketsInUse, Equals, 1)
-
-	// Refresh session and socket must be released.
-	session.Refresh()
-	stats = mgo.GetStats()
-	c.Assert(stats.SocketsInUse, Equals, 0)
-}
-
-func (s *S) TestTopologySyncWithSlaveSeed(c *C) {
-	// That's supposed to be a slave. Must run discovery
-	// and find out master to insert successfully.
-	session, err := mgo.Mongo("localhost:40012")
-	c.Assert(err, IsNil)
-	defer session.Close()
-
-	coll := session.DB("mydb").C("mycoll")
-	coll.Insert(M{"a": 1, "b": 2})
-
-	result := struct{ Ok bool }{}
-	err = session.Run("getLastError", &result)
-	c.Assert(err, IsNil)
-	c.Assert(result.Ok, Equals, true)
-
-	// One connection to each during discovery. Master
-	// socket recycled for insert. 
-	stats := mgo.GetStats()
-	c.Assert(stats.MasterConns, Equals, 1)
-	c.Assert(stats.SlaveConns, Equals, 2)
-
-	// Only one socket reference alive, in the master socket owned
-	// by the above session.
-	c.Assert(stats.SocketsInUse, Equals, 1)
-
-	// Refresh it, and it must be gone.
-	session.Refresh()
-	stats = mgo.GetStats()
-	c.Assert(stats.SocketsInUse, Equals, 0)
-}
-
 func (s *S) TestRunString(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -109,7 +49,7 @@ func (s *S) TestRunString(c *C) {
 }
 
 func (s *S) TestRunValue(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -120,7 +60,7 @@ func (s *S) TestRunValue(c *C) {
 }
 
 func (s *S) TestPing(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -140,7 +80,7 @@ func (s *S) TestPing(c *C) {
 }
 
 func (s *S) TestURLSingle(c *C) {
-	session, err := mgo.Mongo("mongodb://localhost:40001/")
+	session, err := mgo.Dial("mongodb://localhost:40001/")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -151,7 +91,7 @@ func (s *S) TestURLSingle(c *C) {
 }
 
 func (s *S) TestURLMany(c *C) {
-	session, err := mgo.Mongo("mongodb://localhost:40011,localhost:40012/")
+	session, err := mgo.Dial("mongodb://localhost:40011,localhost:40012/")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -162,7 +102,7 @@ func (s *S) TestURLMany(c *C) {
 }
 
 func (s *S) TestInsertFindOne(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -178,7 +118,7 @@ func (s *S) TestInsertFindOne(c *C) {
 }
 
 func (s *S) TestInsertFindOneMap(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -191,8 +131,124 @@ func (s *S) TestInsertFindOneMap(c *C) {
 	c.Assert(result["b"], Equals, 2)
 }
 
+func (s *S) TestInsertFindAll(c *C) {
+	session, err := mgo.Dial("localhost:40001")
+	c.Assert(err, IsNil)
+	defer session.Close()
+
+	coll := session.DB("mydb").C("mycoll")
+	coll.Insert(M{"a": 1, "b": 2})
+	coll.Insert(M{"a": 3, "b": 4})
+
+	type R struct{ A, B int }
+	var result []R
+
+	assertResult := func() {
+		c.Assert(len(result), Equals, 2)
+		c.Assert(result[0].A, Equals, 1)
+		c.Assert(result[0].B, Equals, 2)
+		c.Assert(result[1].A, Equals, 3)
+		c.Assert(result[1].B, Equals, 4)
+	}
+
+	// nil slice
+	err = coll.Find(nil).Sort(M{"a": 1}).All(&result)
+	c.Assert(err, IsNil)
+	assertResult()
+
+	// Previously allocated slice
+	allocd := make([]R, 5)
+	result = allocd
+	err = coll.Find(nil).Sort(M{"a": 1}).All(&result)
+	c.Assert(err, IsNil)
+	assertResult()
+
+	// Ensure result is backed by the originally allocated array
+	c.Assert(&result[0], Equals, &allocd[0])
+
+	// Non-pointer slice error
+	f := func() { coll.Find(nil).All(result) }
+	c.Assert(f, Panics, "result argument must be a slice address")
+
+	// Non-slice error
+	f = func() { coll.Find(nil).All(new(int)) }
+	c.Assert(f, Panics, "result argument must be a slice address")
+}
+
+func (s *S) TestFindRef(c *C) {
+	session, err := mgo.Dial("localhost:40001")
+	c.Assert(err, IsNil)
+	defer session.Close()
+
+	db1 := session.DB("db1")
+	db1col1 := db1.C("col1")
+
+	db2 := session.DB("db2")
+	db2col1 := db2.C("col1")
+
+	db1col1.Insert(M{"_id": 1, "n": 1})
+	db1col1.Insert(M{"_id": 2, "n": 2})
+	db2col1.Insert(M{"_id": 2, "n": 3})
+
+	result := struct{ N int }{}
+
+	ref1 := &mgo.DBRef{Collection: "col1", Id: 1}
+	ref2 := &mgo.DBRef{Collection: "col1", Id: 2, Database: "db2"}
+
+	err = db1.FindRef(ref1, &result)
+	c.Assert(err, IsNil)
+	c.Assert(result.N, Equals, 1)
+
+	err = db1.FindRef(ref2, &result)
+	c.Assert(err, IsNil)
+	c.Assert(result.N, Equals, 3)
+
+	err = db2.FindRef(ref1, &result)
+	c.Assert(err, Equals, mgo.NotFound)
+
+	err = db2.FindRef(ref2, &result)
+	c.Assert(err, IsNil)
+	c.Assert(result.N, Equals, 3)
+
+	err = session.FindRef(ref2, &result)
+	c.Assert(err, IsNil)
+	c.Assert(result.N, Equals, 3)
+
+	err = session.FindRef(ref1, &result)
+	c.Assert(err, ErrorMatches, "Can't resolve database for &mgo.DBRef{Collection:\"col1\", Id:1, Database:\"\"}")
+}
+
+func (s *S) TestDatabaseAndCollectionNames(c *C) {
+	session, err := mgo.Dial("localhost:40001")
+	c.Assert(err, IsNil)
+	defer session.Close()
+
+	db1 := session.DB("db1")
+	db1col1 := db1.C("col1")
+	db1col2 := db1.C("col2")
+
+	db2 := session.DB("db2")
+	db2col1 := db2.C("col3")
+
+	db1col1.Insert(M{"_id": 1})
+	db1col2.Insert(M{"_id": 1})
+	db2col1.Insert(M{"_id": 1})
+
+	names, err := session.DatabaseNames()
+	c.Assert(err, IsNil)
+	c.Assert(names, Equals, []string{"db1", "db2"})
+
+	names, err = db1.CollectionNames()
+	c.Assert(err, IsNil)
+	c.Assert(names, Equals, []string{"col1", "col2", "system.indexes"})
+
+	names, err = db2.CollectionNames()
+	c.Assert(err, IsNil)
+	c.Assert(names, Equals, []string{"col3", "system.indexes"})
+}
+
 func (s *S) TestSelect(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -208,7 +264,7 @@ func (s *S) TestSelect(c *C) {
 }
 
 func (s *S) TestUpdate(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -235,8 +291,39 @@ func (s *S) TestUpdate(c *C) {
 	c.Assert(err, Equals, mgo.NotFound)
 }
 
+func (s *S) TestUpdateNil(c *C) {
+	session, err := mgo.Dial("localhost:40001")
+	c.Assert(err, IsNil)
+	defer session.Close()
+
+	coll := session.DB("mydb").C("mycoll")
+
+	err = coll.Insert(M{"k": 42, "n": 42})
+	c.Assert(err, IsNil)
+	err = coll.Update(nil, M{"$inc": M{"n": 1}})
+	c.Assert(err, IsNil)
+
+	result := make(M)
+	err = coll.Find(M{"k": 42}).One(result)
+	c.Assert(err, IsNil)
+	c.Assert(result["n"], Equals, 43)
+
+	err = coll.Insert(M{"k": 45, "n": 45})
+	c.Assert(err, IsNil)
+	err = coll.UpdateAll(nil, M{"$inc": M{"n": 1}})
+	c.Assert(err, IsNil)
+
+	err = coll.Find(M{"k": 42}).One(result)
+	c.Assert(err, IsNil)
+	c.Assert(result["n"], Equals, 44)
+	err = coll.Find(M{"k": 45}).One(result)
+	c.Assert(err, IsNil)
+	c.Assert(result["n"], Equals, 46)
+
+}
+
 func (s *S) TestUpsert(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -284,7 +371,7 @@ func (s *S) TestUpsert(c *C) {
 }
 
 func (s *S) TestUpdateAll(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -317,7 +404,7 @@ func (s *S) TestUpdateAll(c *C) {
 }
 
 func (s *S) TestRemove(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -346,7 +433,7 @@ func (s *S) TestRemove(c *C) {
 }
 
 func (s *S) TestRemoveAll(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -373,8 +460,58 @@ func (s *S) TestRemoveAll(c *C) {
 	c.Assert(err, Equals, mgo.NotFound)
 }
 
+func (s *S) TestDropDatabase(c *C) {
+	session, err := mgo.Dial("localhost:40001")
+	c.Assert(err, IsNil)
+	defer session.Close()
+
+	db1 := session.DB("db1")
+	db1.C("col").Insert(M{"_id": 1})
+
+	db2 := session.DB("db2")
+	db2.C("col").Insert(M{"_id": 1})
+
+	err = db1.DropDatabase()
+	c.Assert(err, IsNil)
+
+	names, err := session.DatabaseNames()
+	c.Assert(err, IsNil)
+	c.Assert(names, Equals, []string{"db2"})
+
+	err = db2.DropDatabase()
+	c.Assert(err, IsNil)
+
+	names, err = session.DatabaseNames()
+	c.Assert(err, IsNil)
+	c.Assert(names, Equals, []string(nil))
+}
+
+func (s *S) TestDropCollection(c *C) {
+	session, err := mgo.Dial("localhost:40001")
+	c.Assert(err, IsNil)
+	defer session.Close()
+
+	db := session.DB("db1")
+	db.C("col1").Insert(M{"_id": 1})
+	db.C("col2").Insert(M{"_id": 1})
+
+	err = db.C("col1").DropCollection()
+	c.Assert(err, IsNil)
+
+	names, err := db.CollectionNames()
+	c.Assert(err, IsNil)
+	c.Assert(names, Equals, []string{"col2", "system.indexes"})
+
+	err = db.C("col2").DropCollection()
+	c.Assert(err, IsNil)
+
+	names, err = db.CollectionNames()
+	c.Assert(err, IsNil)
+	c.Assert(names, Equals, []string{"system.indexes"})
+}
+
 func (s *S) TestFindAndModify(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -415,7 +552,7 @@ func (s *S) TestFindAndModify(c *C) {
 }
 
 func (s *S) TestCountCollection(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -433,7 +570,7 @@ func (s *S) TestCountCollection(c *C) {
 }
 
 func (s *S) TestCountQuery(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -451,7 +588,7 @@ func (s *S) TestCountQuery(c *C) {
 }
 
 func (s *S) TestCountQuerySorted(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -468,8 +605,30 @@ func (s *S) TestCountQuerySorted(c *C) {
 	c.Assert(n, Equals, 2)
 }
 
+func (s *S) TestCountSkipLimit(c *C) {
+	session, err := mgo.Dial("localhost:40001")
+	c.Assert(err, IsNil)
+	defer session.Close()
+
+	coll := session.DB("mydb").C("mycoll")
+
+	ns := []int{40, 41, 42, 43, 44}
+	for _, n := range ns {
+		err := coll.Insert(M{"n": n})
+		c.Assert(err, IsNil)
+	}
+
+	n, err := coll.Find(nil).Skip(1).Limit(3).Count()
+	c.Assert(err, IsNil)
+	c.Assert(n, Equals, 3)
+
+	n, err = coll.Find(nil).Skip(1).Limit(5).Count()
+	c.Assert(err, IsNil)
+	c.Assert(n, Equals, 4)
+}
+
 func (s *S) TestQueryExplain(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -491,7 +650,7 @@ func (s *S) TestQueryExplain(c *C) {
 
 	n := 0
 	var result M
-	err = query.For(&result, func() os.Error {
+	err = query.For(&result, func() error {
 		n++
 		return nil
 	})
@@ -500,7 +659,7 @@ func (s *S) TestQueryExplain(c *C) {
 }
 
 func (s *S) TestQueryHint(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -515,7 +674,7 @@ func (s *S) TestQueryHint(c *C) {
 }
 
 func (s *S) TestFindOneNotFound(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -524,12 +683,12 @@ func (s *S) TestFindOneNotFound(c *C) {
 	result := struct{ A, B int }{}
 	err = coll.Find(M{"a": 1}).One(&result)
 	c.Assert(err, Equals, mgo.NotFound)
-	c.Assert(err, Matches, "Document not found")
+	c.Assert(err, ErrorMatches, "Document not found")
 	c.Assert(err == mgo.NotFound, Equals, true)
 }
 
 func (s *S) TestFindNil(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -544,7 +703,7 @@ func (s *S) TestFindNil(c *C) {
 }
 
 func (s *S) TestFindIterAll(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -560,13 +719,11 @@ func (s *S) TestFindIterAll(c *C) {
 	mgo.ResetStats()
 
 	query := coll.Find(M{"n": M{"$gte": 42}}).Sort(M{"$natural": 1}).Prefetch(0).Batch(2)
-	iter, err := query.Iter()
-	c.Assert(err, IsNil)
-
+	iter := query.Iter()
 	result := struct{ N int }{}
 	for i := 2; i < 7; i++ {
-		err = iter.Next(&result)
-		c.Assert(err, IsNil)
+		ok := iter.Next(&result)
+		c.Assert(ok, Equals, true)
 		c.Assert(result.N, Equals, ns[i])
 		if i == 1 {
 			stats := mgo.GetStats()
@@ -574,8 +731,9 @@ func (s *S) TestFindIterAll(c *C) {
 		}
 	}
 
-	err = iter.Next(&result)
-	c.Assert(err == mgo.NotFound, Equals, true)
+	ok := iter.Next(&result)
+	c.Assert(ok, Equals, false)
+	c.Assert(iter.Err(), IsNil)
 
 	session.Refresh() // Release socket.
 
@@ -587,7 +745,7 @@ func (s *S) TestFindIterAll(c *C) {
 }
 
 func (s *S) TestFindIterTwiceWithSameQuery(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -599,39 +757,37 @@ func (s *S) TestFindIterTwiceWithSameQuery(c *C) {
 
 	query := coll.Find(M{}).Sort(M{"n": 1})
 
-	result1, err := query.Skip(1).Iter()
-	c.Assert(err, IsNil)
-	result2, err := query.Skip(2).Iter()
-	c.Assert(err, IsNil)
+	result1 := query.Skip(1).Iter()
+	result2 := query.Skip(2).Iter()
 
 	result := struct{ N int }{}
-	err = result2.Next(&result)
-	c.Assert(err, IsNil)
+	ok := result2.Next(&result)
+	c.Assert(ok, Equals, true)
 	c.Assert(result.N, Equals, 42)
-	err = result1.Next(&result)
-	c.Assert(err, IsNil)
+	ok = result1.Next(&result)
+	c.Assert(ok, Equals, true)
 	c.Assert(result.N, Equals, 41)
 }
 
 func (s *S) TestFindIterWithoutResults(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
 	coll := session.DB("mydb").C("mycoll")
 	coll.Insert(M{"n": 42})
 
-	iter, err := coll.Find(M{"n": 0}).Iter()
-	c.Assert(err, IsNil)
+	iter := coll.Find(M{"n": 0}).Iter()
 
 	result := struct{ N int }{}
-	err = iter.Next(&result)
+	ok := iter.Next(&result)
+	c.Assert(ok, Equals, false)
+	c.Assert(iter.Err(), IsNil)
 	c.Assert(result.N, Equals, 0)
-	c.Assert(err == mgo.NotFound, Equals, true)
 }
 
 func (s *S) TestFindIterLimit(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -647,18 +803,18 @@ func (s *S) TestFindIterLimit(c *C) {
 	mgo.ResetStats()
 
 	query := coll.Find(M{"n": M{"$gte": 42}}).Sort(M{"$natural": 1}).Limit(3)
-	iter, err := query.Iter()
-	c.Assert(err, IsNil)
+	iter := query.Iter()
 
 	result := struct{ N int }{}
 	for i := 2; i < 5; i++ {
-		err = iter.Next(&result)
-		c.Assert(err, IsNil)
+		ok := iter.Next(&result)
+		c.Assert(ok, Equals, true)
 		c.Assert(result.N, Equals, ns[i])
 	}
 
-	err = iter.Next(&result)
-	c.Assert(err == mgo.NotFound, Equals, true)
+	ok := iter.Next(&result)
+	c.Assert(ok, Equals, false)
+	c.Assert(iter.Err(), IsNil)
 
 	session.Refresh() // Release socket.
 
@@ -670,7 +826,7 @@ func (s *S) TestFindIterLimit(c *C) {
 }
 
 func (s *S) TestFindIterLimitWithBatch(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -689,13 +845,11 @@ func (s *S) TestFindIterLimitWithBatch(c *C) {
 	mgo.ResetStats()
 
 	query := coll.Find(M{"n": M{"$gte": 42}}).Sort(M{"$natural": 1}).Limit(3).Batch(2)
-	iter, err := query.Iter()
-	c.Assert(err, IsNil)
-
+	iter := query.Iter()
 	result := struct{ N int }{}
 	for i := 2; i < 5; i++ {
-		err = iter.Next(&result)
-		c.Assert(err, IsNil)
+		ok := iter.Next(&result)
+		c.Assert(ok, Equals, true)
 		c.Assert(result.N, Equals, ns[i])
 		if i == 3 {
 			stats := mgo.GetStats()
@@ -703,8 +857,9 @@ func (s *S) TestFindIterLimitWithBatch(c *C) {
 		}
 	}
 
-	err = iter.Next(&result)
-	c.Assert(err == mgo.NotFound, Equals, true)
+	ok := iter.Next(&result)
+	c.Assert(ok, Equals, false)
+	c.Assert(iter.Err(), IsNil)
 
 	session.Refresh() // Release socket.
 
@@ -715,6 +870,57 @@ func (s *S) TestFindIterLimitWithBatch(c *C) {
 	c.Assert(stats.SocketsInUse, Equals, 0)
 }
 
+func (s *S) TestFindIterSortWithBatch(c *C) {
+	session, err := mgo.Dial("localhost:40001")
+	c.Assert(err, IsNil)
+	defer session.Close()
+
+	coll := session.DB("mydb").C("mycoll")
+
+	ns := []int{40, 41, 42, 43, 44, 45, 46}
+	for _, n := range ns {
+		coll.Insert(M{"n": n})
+	}
+
+	// Without this, the logic above breaks because Mongo refuses to
+	// return a cursor with an in-memory sort.
+	coll.EnsureIndexKey([]string{"n"})
+
+	// Ping the database to ensure the nonce has been received already.
+	c.Assert(session.Ping(), IsNil)
+
+	session.Refresh() // Release socket.
+
+	mgo.ResetStats()
+
+	query := coll.Find(M{"n": M{"$lte": 44}}).Sort(M{"n": -1}).Batch(2)
+	iter := query.Iter()
+	ns = []int{46, 45, 44, 43, 42, 41, 40}
+	result := struct{ N int }{}
+	for i := 2; i < len(ns); i++ {
+		c.Logf("i=%d", i)
+		ok := iter.Next(&result)
+		c.Assert(ok, Equals, true)
+		c.Assert(result.N, Equals, ns[i])
+		if i == 3 {
+			stats := mgo.GetStats()
+			c.Assert(stats.ReceivedDocs, Equals, 2)
+		}
+	}
+
+	ok := iter.Next(&result)
+	c.Assert(ok, Equals, false)
+	c.Assert(iter.Err(), IsNil)
+
+	session.Refresh() // Release socket.
+
+	stats := mgo.GetStats()
+	c.Assert(stats.SentOps, Equals, 3)     // 1*QUERY_OP + 2*GET_MORE_OP
+	c.Assert(stats.ReceivedOps, Equals, 3) // and its REPLY_OPs
+	c.Assert(stats.ReceivedDocs, Equals, 5)
+	c.Assert(stats.SocketsInUse, Equals, 0)
+}
+
 // Test tailable cursors in a situation where Next has to sleep to
 // respect the timeout requested on Tail.
 func (s *S) TestFindTailTimeoutWithSleep(c *C) {
@@ -722,7 +928,7 @@ func (s *S) TestFindTailTimeoutWithSleep(c *C) {
 		c.Skip("-fast")
 	}
 
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -743,17 +949,18 @@ func (s *S) TestFindTailTimeoutWithSleep(c *C) {
 
 	mgo.ResetStats()
 
-	const timeout = 3
+	timeout := 3 * time.Second
 
 	query := coll.Find(M{"n": M{"$gte": 42}}).Sort(M{"$natural": 1}).Prefetch(0).Batch(2)
-	iter, err := query.Tail(timeout)
-	c.Assert(err, IsNil)
+	iter := query.Tail(timeout)
 
 	n := len(ns)
 	result := struct{ N int }{}
 	for i := 2; i != n; i++ {
-		err = iter.Next(&result)
-		c.Assert(err, IsNil)
+		ok := iter.Next(&result)
+		c.Assert(ok, Equals, true)
+		c.Assert(iter.Err(), IsNil)
+		c.Assert(iter.Timeout(), Equals, false)
 		c.Assert(result.N, Equals, ns[i])
 		if i == 3 { // The batch boundary.
 			stats := mgo.GetStats()
@@ -768,7 +975,7 @@ func (s *S) TestFindTailTimeoutWithSleep(c *C) {
 		// The internal AwaitData timing of MongoDB is around 2 seconds,
 		// so this should force mgo to sleep at least once by itself to
 		// respect the requested timeout.
-		time.Sleep(timeout*1e9 + 5e8)
+		time.Sleep(timeout + 5e8*time.Nanosecond)
 		session := session.New()
 		defer session.Close()
 		coll := session.DB("mydb").C("mycoll")
@@ -776,8 +983,10 @@ func (s *S) TestFindTailTimeoutWithSleep(c *C) {
 	}()
 
 	c.Log("Will wait for Next with N=47...")
-	err = iter.Next(&result)
-	c.Assert(err, IsNil)
+	ok := iter.Next(&result)
+	c.Assert(ok, Equals, true)
+	c.Assert(iter.Err(), IsNil)
+	c.Assert(iter.Timeout(), Equals, false)
 	c.Assert(result.N, Equals, 47)
 	c.Log("Got Next with N=47!")
 
@@ -793,16 +1002,27 @@ func (s *S) TestFindTailTimeoutWithSleep(c *C) {
 
 	c.Log("Will wait for a result which will never come...")
 
-	started := time.Nanoseconds()
-	err = iter.Next(&result)
-	c.Assert(time.Nanoseconds()-started > timeout*1e9, Equals, true)
-	c.Assert(err == mgo.TailTimeout, Equals, true)
+	started := time.Now()
+	ok = iter.Next(&result)
+	c.Assert(ok, Equals, false)
+	c.Assert(iter.Err(), IsNil)
+	c.Assert(iter.Timeout(), Equals, true)
+	c.Assert(started.Before(time.Now().Add(-timeout)), Equals, true)
+
+	c.Log("Will now reuse the timed out tail cursor...")
+
+	coll.Insert(M{"n": 48})
+	ok = iter.Next(&result)
+	c.Assert(ok, Equals, true)
+	c.Assert(iter.Err(), IsNil)
+	c.Assert(iter.Timeout(), Equals, false)
+	c.Assert(result.N, Equals, 48)
 }
 
 // Test tailable cursors in a situation where Next never gets to sleep once
 // to respect the timeout requested on Tail.
 func (s *S) TestFindTailTimeoutNoSleep(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -823,17 +1043,18 @@ func (s *S) TestFindTailTimeoutNoSleep(c *C) {
 
 	mgo.ResetStats()
 
-	const timeout = 1
+	timeout := 1 * time.Second
 
 	query := coll.Find(M{"n": M{"$gte": 42}}).Sort(M{"$natural": 1}).Prefetch(0).Batch(2)
-	iter, err := query.Tail(timeout)
-	c.Assert(err, IsNil)
+	iter := query.Tail(timeout)
 
 	n := len(ns)
 	result := struct{ N int }{}
 	for i := 2; i != n; i++ {
-		err = iter.Next(&result)
-		c.Assert(err, IsNil)
+		ok := iter.Next(&result)
+		c.Assert(ok, Equals, true)
+		c.Assert(iter.Err(), IsNil)
+		c.Assert(iter.Timeout(), Equals, false)
 		c.Assert(result.N, Equals, ns[i])
 		if i == 3 { // The batch boundary.
 			stats := mgo.GetStats()
@@ -855,8 +1076,10 @@ func (s *S) TestFindTailTimeoutNoSleep(c *C) {
 	}()
 
 	c.Log("Will wait for Next with N=47...")
-	err = iter.Next(&result)
-	c.Assert(err, IsNil)
+	ok := iter.Next(&result)
+	c.Assert(ok, Equals, true)
+	c.Assert(iter.Err(), IsNil)
+	c.Assert(iter.Timeout(), Equals, false)
 	c.Assert(result.N, Equals, 47)
 	c.Log("Got Next with N=47!")
 
@@ -872,10 +1095,21 @@ func (s *S) TestFindTailTimeoutNoSleep(c *C) {
 
 	c.Log("Will wait for a result which will never come...")
 
-	started := time.Nanoseconds()
-	err = iter.Next(&result)
-	c.Assert(time.Nanoseconds()-started > timeout*1e9, Equals, true)
-	c.Assert(err == mgo.TailTimeout, Equals, true)
+	started := time.Now()
+	ok = iter.Next(&result)
+	c.Assert(ok, Equals, false)
+	c.Assert(iter.Err(), IsNil)
+	c.Assert(iter.Timeout(), Equals, true)
+	c.Assert(started.Before(time.Now().Add(-timeout)), Equals, true)
+
+	c.Log("Will now reuse the timed out tail cursor...")
+
+	coll.Insert(M{"n": 48})
+	ok = iter.Next(&result)
+	c.Assert(ok, Equals, true)
+	c.Assert(iter.Err(), IsNil)
+	c.Assert(iter.Timeout(), Equals, false)
+	c.Assert(result.N, Equals, 48)
 }
 
 // Test tailable cursors in a situation where Next never gets to sleep once
@@ -885,7 +1119,7 @@ func (s *S) TestFindTailNoTimeout(c *C) {
 		c.Skip("-fast")
 	}
 
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -907,14 +1141,14 @@ func (s *S) TestFindTailNoTimeout(c *C) {
 	mgo.ResetStats()
 
 	query := coll.Find(M{"n": M{"$gte": 42}}).Sort(M{"$natural": 1}).Prefetch(0).Batch(2)
-	iter, err := query.Tail(-1)
+	iter := query.Tail(-1)
 	c.Assert(err, IsNil)
 
 	n := len(ns)
 	result := struct{ N int }{}
 	for i := 2; i != n; i++ {
-		err = iter.Next(&result)
-		c.Assert(err, IsNil)
+		ok := iter.Next(&result)
+		c.Assert(ok, Equals, true)
 		c.Assert(result.N, Equals, ns[i])
 		if i == 3 { // The batch boundary.
 			stats := mgo.GetStats()
@@ -934,8 +1168,10 @@ func (s *S) TestFindTailNoTimeout(c *C) {
 	}()
 
 	c.Log("Will wait for Next with N=47...")
-	err = iter.Next(&result)
-	c.Assert(err, IsNil)
+	ok := iter.Next(&result)
+	c.Assert(ok, Equals, true)
+	c.Assert(iter.Err(), IsNil)
+	c.Assert(iter.Timeout(), Equals, false)
 	c.Assert(result.N, Equals, 47)
 	c.Log("Got Next with N=47!")
 
@@ -951,15 +1187,15 @@ func (s *S) TestFindTailNoTimeout(c *C) {
 
 	c.Log("Will wait for a result which will never come...")
 
-	gotNext := make(chan os.Error)
+	gotNext := make(chan bool)
 	go func() {
-		err := iter.Next(&result)
-		gotNext <- err
+		ok := iter.Next(&result)
+		gotNext <- ok
 	}()
 
 	select {
-	case err := <-gotNext:
-		c.Fatal("Next returned: " + err.String())
+	case ok := <-gotNext:
+		c.Fatalf("Next returned: %v", ok)
 	case <-time.After(3e9):
 		// Good. Should still be sleeping at that point.
 	}
@@ -968,15 +1204,17 @@ func (s *S) TestFindTailNoTimeout(c *C) {
 	session.Close()
 
 	select {
-	case err := <-gotNext:
-		c.Assert(err, Matches, "Closed explicitly")
+	case ok := <-gotNext:
+		c.Assert(ok, Equals, false)
+		c.Assert(iter.Err(), ErrorMatches, "Closed explicitly")
+		c.Assert(iter.Timeout(), Equals, false)
 	case <-time.After(1e9):
 		c.Fatal("Closing the session did not unblock Next")
 	}
 }
 
 func (s *S) TestFindForOnIter(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -992,12 +1230,11 @@ func (s *S) TestFindForOnIter(c *C) {
 	mgo.ResetStats()
 
 	query := coll.Find(M{"n": M{"$gte": 42}}).Sort(M{"$natural": 1}).Prefetch(0).Batch(2)
-	iter, err := query.Iter()
-	c.Assert(err, IsNil)
+	iter := query.Iter()
 
 	i := 2
 	var result *struct{ N int }
-	err = iter.For(&result, func() os.Error {
+	err = iter.For(&result, func() error {
 		c.Assert(i < 7, Equals, true)
 		c.Assert(result.N, Equals, ns[i])
 		if i == 1 {
@@ -1019,7 +1256,7 @@ func (s *S) TestFindForOnIter(c *C) {
 }
 
 func (s *S) TestFindFor(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1038,7 +1275,7 @@ func (s *S) TestFindFor(c *C) {
 
 	i := 2
 	var result *struct{ N int }
-	err = query.For(&result, func() os.Error {
+	err = query.For(&result, func() error {
 		c.Assert(i < 7, Equals, true)
 		c.Assert(result.N, Equals, ns[i])
 		if i == 1 {
@@ -1060,7 +1297,7 @@ func (s *S) TestFindFor(c *C) {
 }
 
 func (s *S) TestFindForStopOnError(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1074,20 +1311,20 @@ func (s *S) TestFindForStopOnError(c *C) {
 	query := coll.Find(M{"n": M{"$gte": 42}})
 	i := 2
 	var result *struct{ N int }
-	err = query.For(&result, func() os.Error {
+	err = query.For(&result, func() error {
 		c.Assert(i < 4, Equals, true)
 		c.Assert(result.N, Equals, ns[i])
 		if i == 3 {
-			return os.NewError("stop!")
+			return errors.New("stop!")
 		}
 		i++
 		return nil
 	})
-	c.Assert(err, Matches, "stop!")
+	c.Assert(err, ErrorMatches, "stop!")
 }
 
 func (s *S) TestFindForResetsResult(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1102,7 +1339,7 @@ func (s *S) TestFindForResetsResult(c *C) {
 
 	i := 0
 	var sresult *struct{ N1, N2, N3 int }
-	err = query.For(&sresult, func() os.Error {
+	err = query.For(&sresult, func() error {
 		switch i {
 		case 0:
 			c.Assert(sresult.N1, Equals, 1)
@@ -1121,8 +1358,8 @@ func (s *S) TestFindForResetsResult(c *C) {
 
 	i = 0
 	var mresult M
-	err = query.For(&mresult, func() os.Error {
-		mresult["_id"] = nil, false
+	err = query.For(&mresult, func() error {
+		delete(mresult, "_id")
 		switch i {
 		case 0:
 			c.Assert(mresult, Equals, M{"n1": 1})
@@ -1138,10 +1375,10 @@ func (s *S) TestFindForResetsResult(c *C) {
 
 	i = 0
 	var iresult interface{}
-	err = query.For(&iresult, func() os.Error {
+	err = query.For(&iresult, func() error {
 		mresult, ok := iresult.(bson.M)
 		c.Assert(ok, Equals, true, Bug("%#v", iresult))
-		mresult["_id"] = nil, false
+		delete(mresult, "_id")
 		switch i {
 		case 0:
 			c.Assert(mresult, Equals, bson.M{"n1": 1})
@@ -1157,7 +1394,7 @@ func (s *S) TestFindForResetsResult(c *C) {
 }
 
 func (s *S) TestSort(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1175,24 +1412,23 @@ func (s *S) TestSort(c *C) {
 
 	query := coll.Find(M{})
 	query.Sort(bson.D{{"a", -1}}) // Should be ignored.
-	iter, err := query.Sort(bson.D{{"b", -1}, {"a", 1}}).Iter()
-	c.Assert(err, IsNil)
+	iter := query.Sort(bson.D{{"b", -1}, {"a", 1}}).Iter()
 
 	l := make([]int, 18)
 	r := struct{ A, B int }{}
 	for i := 0; i != len(l); i += 2 {
-		err := iter.Next(&r)
+		ok := iter.Next(&r)
+		c.Assert(ok, Equals, true)
 		c.Assert(err, IsNil)
 		l[i] = r.A
 		l[i+1] = r.B
 	}
 
-	c.Assert(l, Equals,
-		[]int{0, 2, 1, 2, 2, 2, 0, 1, 1, 1, 2, 1, 0, 0, 1, 0, 2, 0})
+	c.Assert(l, Equals, []int{0, 2, 1, 2, 2, 2, 0, 1, 1, 1, 2, 1, 0, 0, 1, 0, 2, 0})
 }
 
 func (s *S) TestPrefetching(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1215,33 +1451,32 @@ func (s *S) TestPrefetching(c *C) {
 
 		switch testi {
 		case 0: // First, using query methods.
-			iter, err = coll.Find(M{}).Prefetch(0.27).Batch(100).Iter()
-			c.Assert(err, IsNil)
+			iter = coll.Find(M{}).Prefetch(0.27).Batch(100).Iter()
 			nextn = 73
 
 		case 1: // Then, the default session value.
 			session.SetBatch(100)
-			iter, err = coll.Find(M{}).Iter()
-			c.Assert(err, IsNil)
+			iter = coll.Find(M{}).Iter()
 			nextn = 75
 
 		case 2: // Then, tweaking the session value.
 			session.SetBatch(100)
 			session.SetPrefetch(0.27)
-			iter, err = coll.Find(M{}).Iter()
-			c.Assert(err, IsNil)
+			iter = coll.Find(M{}).Iter()
 			nextn = 73
 		}
 
 		result := struct{ N int }{}
 		for i := 0; i != nextn; i++ {
-			iter.Next(&result)
+			ok := iter.Next(&result)
+			c.Assert(ok, Equals, true)
 		}
 
 		stats := mgo.GetStats()
 		c.Assert(stats.ReceivedDocs, Equals, 100)
 
-		iter.Next(&result)
+		ok := iter.Next(&result)
+		c.Assert(ok, Equals, true)
 
 		// Ping the database just to wait for the fetch above
 		// to get delivered.
@@ -1253,68 +1488,100 @@ func (s *S) TestPrefetching(c *C) {
 }
 
 func (s *S) TestSafeSetting(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
 	// Check the default
 	safe := session.Safe()
 	c.Assert(safe.W, Equals, 0)
+	c.Assert(safe.WMode, Equals, "")
 	c.Assert(safe.WTimeout, Equals, 0)
 	c.Assert(safe.FSync, Equals, false)
+	c.Assert(safe.J, Equals, false)
 
 	// Tweak it
 	session.SetSafe(&mgo.Safe{W: 1, WTimeout: 2, FSync: true})
 	safe = session.Safe()
 	c.Assert(safe.W, Equals, 1)
+	c.Assert(safe.WMode, Equals, "")
 	c.Assert(safe.WTimeout, Equals, 2)
 	c.Assert(safe.FSync, Equals, true)
+	c.Assert(safe.J, Equals, false)
 
 	// Reset it again.
 	session.SetSafe(&mgo.Safe{})
 	safe = session.Safe()
 	c.Assert(safe.W, Equals, 0)
+	c.Assert(safe.WMode, Equals, "")
 	c.Assert(safe.WTimeout, Equals, 0)
 	c.Assert(safe.FSync, Equals, false)
+	c.Assert(safe.J, Equals, false)
 
-	// Ensure safety to something higher.
-	session.SetSafe(&mgo.Safe{W: 5, WTimeout: 6, FSync: true})
+	// Ensure safety to something more conservative.
+	session.SetSafe(&mgo.Safe{W: 5, WTimeout: 6, J: true})
 	safe = session.Safe()
 	c.Assert(safe.W, Equals, 5)
+	c.Assert(safe.WMode, Equals, "")
 	c.Assert(safe.WTimeout, Equals, 6)
-	c.Assert(safe.FSync, Equals, true)
+	c.Assert(safe.FSync, Equals, false)
+	c.Assert(safe.J, Equals, true)
 
 	// Ensure safety to something less conservative won't change it.
-	session.EnsureSafe(&mgo.Safe{W: 4, WTimeout: 7, FSync: false})
+	session.EnsureSafe(&mgo.Safe{W: 4, WTimeout: 7})
 	safe = session.Safe()
 	c.Assert(safe.W, Equals, 5)
+	c.Assert(safe.WMode, Equals, "")
 	c.Assert(safe.WTimeout, Equals, 6)
-	c.Assert(safe.FSync, Equals, true)
+	c.Assert(safe.FSync, Equals, false)
+	c.Assert(safe.J, Equals, true)
 
 	// But to something more conservative will.
-	session.EnsureSafe(&mgo.Safe{W: 6, WTimeout: 4})
+	session.EnsureSafe(&mgo.Safe{W: 6, WTimeout: 4, FSync: true})
 	safe = session.Safe()
 	c.Assert(safe.W, Equals, 6)
+	c.Assert(safe.WMode, Equals, "")
 	c.Assert(safe.WTimeout, Equals, 4)
 	c.Assert(safe.FSync, Equals, true)
+	c.Assert(safe.J, Equals, false)
+
+	// Even more conservative.
+	session.EnsureSafe(&mgo.Safe{WMode: "majority", WTimeout: 2})
+	safe = session.Safe()
+	c.Assert(safe.W, Equals, 0)
+	c.Assert(safe.WMode, Equals, "majority")
+	c.Assert(safe.WTimeout, Equals, 2)
+	c.Assert(safe.FSync, Equals, true)
+	c.Assert(safe.J, Equals, false)
+
+	// WMode always overrides, whatever it is, but J doesn't.
+	session.EnsureSafe(&mgo.Safe{WMode: "something", J: true})
+	safe = session.Safe()
+	c.Assert(safe.W, Equals, 0)
+	c.Assert(safe.WMode, Equals, "something")
+	c.Assert(safe.WTimeout, Equals, 2)
+	c.Assert(safe.FSync, Equals, true)
+	c.Assert(safe.J, Equals, false)
 
 	// EnsureSafe with nil does nothing.
 	session.EnsureSafe(nil)
 	safe = session.Safe()
-	c.Assert(safe.W, Equals, 6)
-	c.Assert(safe.WTimeout, Equals, 4)
+	c.Assert(safe.W, Equals, 0)
+	c.Assert(safe.WMode, Equals, "something")
+	c.Assert(safe.WTimeout, Equals, 2)
 	c.Assert(safe.FSync, Equals, true)
+	c.Assert(safe.J, Equals, false)
 
 	// Changing the safety of a cloned session doesn't touch the original.
 	clone := session.Clone()
 	defer clone.Close()
-	clone.EnsureSafe(&mgo.Safe{W: 100})
+	clone.EnsureSafe(&mgo.Safe{WMode: "foo"})
 	safe = session.Safe()
-	c.Assert(safe.W, Equals, 6)
+	c.Assert(safe.WMode, Equals, "something")
 }
 
 func (s *S) TestSafeInsert(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1328,7 +1595,7 @@ func (s *S) TestSafeInsert(c *C) {
 
 	// Session should be safe by default, so inserting it again must fail.
 	err = coll.Insert(M{"_id": 1})
-	c.Assert(err, Matches, "E11000 duplicate.*")
+	c.Assert(err, ErrorMatches, "E11000 duplicate.*")
 	c.Assert(err.(*mgo.LastError).Code, Equals, 11000)
 
 	// It must have sent two operations (INSERT_OP + getLastError QUERY_OP)
@@ -1348,21 +1615,21 @@ func (s *S) TestSafeInsert(c *C) {
 }
 
 func (s *S) TestSafeParameters(c *C) {
-	session, err := mgo.Mongo("localhost:40011")
+	session, err := mgo.Dial("localhost:40011")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
 	coll := session.DB("mydb").C("mycoll")
 
 	// Tweak the safety parameters to something unachievable.
-	session.SetSafe(&mgo.Safe{4, 100, false})
+	session.SetSafe(&mgo.Safe{W: 4, WTimeout: 100})
 	err = coll.Insert(M{"_id": 1})
-	c.Assert(err, Matches, "timeout")
+	c.Assert(err, ErrorMatches, "timeout")
 	c.Assert(err.(*mgo.LastError).WTimeout, Equals, true)
 }
 
 func (s *S) TestQueryErrorOne(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1373,7 +1640,7 @@ func (s *S) TestQueryErrorOne(c *C) {
 	}{}
 
 	err = coll.Find(M{"a": 1}).Select(M{"a": M{"b": 1}}).One(&result)
-	c.Assert(err, Matches, "Unsupported projection option: b")
+	c.Assert(err, ErrorMatches, "Unsupported projection option: b")
 	c.Assert(err.(*mgo.QueryError).Message, Matches, "Unsupported projection option: b")
 	c.Assert(err.(*mgo.QueryError).Code, Equals, 13097)
 
@@ -1382,7 +1649,7 @@ func (s *S) TestQueryErrorOne(c *C) {
 }
 
 func (s *S) TestQueryErrorNext(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1392,11 +1659,13 @@ func (s *S) TestQueryErrorNext(c *C) {
 		Err string "$err"
 	}{}
 
-	iter, err := coll.Find(M{"a": 1}).Select(M{"a": M{"b": 1}}).Iter()
-	c.Assert(err, IsNil)
+	iter := coll.Find(M{"a": 1}).Select(M{"a": M{"b": 1}}).Iter()
 
-	err = iter.Next(&result)
-	c.Assert(err, Matches, "Unsupported projection option: b")
+	ok := iter.Next(&result)
+	c.Assert(ok, Equals, false)
+
+	err = iter.Err()
+	c.Assert(err, ErrorMatches, "Unsupported projection option: b")
 	c.Assert(err.(*mgo.QueryError).Message, Matches, "Unsupported projection option: b")
 	c.Assert(err.(*mgo.QueryError).Code, Equals, 13097)
 
@@ -1405,7 +1674,7 @@ func (s *S) TestQueryErrorNext(c *C) {
 }
 
 func (s *S) TestEnsureIndex(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1452,25 +1721,26 @@ func (s *S) TestEnsureIndex(c *C) {
 	err = sysidx.Find(M{"name": "loc_"}).One(result3)
 	c.Assert(err, IsNil)
 
+	delete(result1, "v")
 	expected1 := M{
 		"name":       "a_1",
 		"key":        bson.M{"a": 1},
 		"ns":         "mydb.mycoll",
-		"v":          0,
 		"background": true,
 	}
 	c.Assert(result1, Equals, expected1)
 
+	delete(result2, "v")
 	expected2 := M{
 		"name":     "a_1_b_-1",
 		"key":      bson.M{"a": 1, "b": -1},
 		"ns":       "mydb.mycoll",
 		"unique":   true,
 		"dropDups": true,
-		"v":        0,
 	}
 	c.Assert(result2, Equals, expected2)
 
+	delete(result3, "v")
 	expected3 := M{
 		"name": "loc_",
 		"key":  bson.M{"loc": "2d"},
@@ -1485,25 +1755,25 @@ func (s *S) TestEnsureIndex(c *C) {
 	err = coll.Insert(M{"a": 1, "b": 1})
 	c.Assert(err, IsNil)
 	err = coll.Insert(M{"a": 1, "b": 1})
-	c.Assert(err, Matches, ".*duplicate key error.*")
+	c.Assert(err, ErrorMatches, ".*duplicate key error.*")
 }
 
 func (s *S) TestEnsureIndexWithBadInfo(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
 	coll := session.DB("mydb").C("mycoll")
 
 	err = coll.EnsureIndex(mgo.Index{})
-	c.Assert(err, Matches, "Invalid index key:.*")
+	c.Assert(err, ErrorMatches, "Invalid index key:.*")
 
 	err = coll.EnsureIndex(mgo.Index{Key: []string{""}})
-	c.Assert(err, Matches, "Invalid index key:.*")
+	c.Assert(err, ErrorMatches, "Invalid index key:.*")
 }
 
 func (s *S) TestEnsureIndexWithUnsafeSession(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1524,11 +1794,11 @@ func (s *S) TestEnsureIndexWithUnsafeSession(c *C) {
 	}
 
 	err = coll.EnsureIndex(index)
-	c.Assert(err, Matches, ".*duplicate key error.*")
+	c.Assert(err, ErrorMatches, ".*duplicate key error.*")
 }
 
 func (s *S) TestEnsureIndexKey(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1550,25 +1820,25 @@ func (s *S) TestEnsureIndexKey(c *C) {
 	err = sysidx.Find(M{"name": "a_1_b_-1"}).One(result2)
 	c.Assert(err, IsNil)
 
+	delete(result1, "v")
 	expected1 := M{
 		"name": "a_1",
 		"key":  bson.M{"a": 1},
 		"ns":   "mydb.mycoll",
-		"v":    0,
 	}
 	c.Assert(result1, Equals, expected1)
 
+	delete(result2, "v")
 	expected2 := M{
 		"name": "a_1_b_-1",
 		"key":  bson.M{"a": 1, "b": -1},
 		"ns":   "mydb.mycoll",
-		"v":    0,
 	}
 	c.Assert(result2, Equals, expected2)
 }
 
 func (s *S) TestEnsureIndexDropIndex(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1599,11 +1869,11 @@ func (s *S) TestEnsureIndexDropIndex(c *C) {
 	c.Assert(err, Equals, mgo.NotFound)
 
 	err = coll.DropIndex([]string{"a"})
-	c.Assert(err, Matches, "index not found")
+	c.Assert(err, ErrorMatches, "index not found")
 }
 
 func (s *S) TestEnsureIndexCaching(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1644,7 +1914,7 @@ func (s *S) TestEnsureIndexCaching(c *C) {
 }
 
 func (s *S) TestEnsureIndexGetIndexes(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1671,7 +1941,7 @@ func (s *S) TestEnsureIndexGetIndexes(c *C) {
 }
 
 func (s *S) TestDistinct(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1684,12 +1954,12 @@ func (s *S) TestDistinct(c *C) {
 	var result []int
 	err = coll.Find(M{"n": M{"$gt": 2}}).Sort(M{"n": 1}).Distinct("n", &result)
 
-	sort.SortInts(result)
+	sort.IntSlice(result).Sort()
 	c.Assert(result, Equals, []int{3, 4, 6})
 }
 
 func (s *S) TestMapReduce(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1724,13 +1994,14 @@ func (s *S) TestMapReduce(c *C) {
 		expected[item.Id] = -1
 	}
 
-	// Ensure proper delivery of Sort request.
+	// Weak attempt of testing that Sort gets delivered.
 	_, err = coll.Find(nil).Sort(M{"n": -1}).MapReduce(job, &result)
-	c.Assert(err, Matches, "best guess plan requested, but scan and order .*")
+	_, isQueryError := err.(*mgo.QueryError)
+	c.Assert(isQueryError, Equals, true)
 }
 
 func (s *S) TestMapReduceFinalize(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1761,7 +2032,7 @@ func (s *S) TestMapReduceFinalize(c *C) {
 }
 
 func (s *S) TestMapReduceToCollection(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1793,7 +2064,7 @@ func (s *S) TestMapReduceToCollection(c *C) {
 		Value int
 	}
 	mr := session.DB("mydb").C("mr")
-	err = mr.Find(nil).For(&item, func() os.Error {
+	err = mr.Find(nil).For(&item, func() error {
 		c.Logf("Item: %#v", &item)
 		c.Assert(item.Value, Equals, expected[item.Id])
 		expected[item.Id] = -1
@@ -1803,7 +2074,7 @@ func (s *S) TestMapReduceToCollection(c *C) {
 }
 
 func (s *S) TestMapReduceToOtherDb(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1816,7 +2087,7 @@ func (s *S) TestMapReduceToOtherDb(c *C) {
 	job := mgo.MapReduce{
 		Map:    "function() { emit(this.n, 1); }",
 		Reduce: "function(key, values) { return Array.sum(values); }",
-		Out:    M{"replace": "mr", "db": "otherdb"},
+		Out:    bson.D{{"replace", "mr"}, {"db", "otherdb"}},
 	}
 
 	info, err := coll.Find(nil).MapReduce(job, nil)
@@ -1835,7 +2106,7 @@ func (s *S) TestMapReduceToOtherDb(c *C) {
 		Value int
 	}
 	mr := session.DB("otherdb").C("mr")
-	err = mr.Find(nil).For(&item, func() os.Error {
+	err = mr.Find(nil).For(&item, func() error {
 		c.Logf("Item: %#v", &item)
 		c.Assert(item.Value, Equals, expected[item.Id])
 		expected[item.Id] = -1
@@ -1845,7 +2116,7 @@ func (s *S) TestMapReduceToOtherDb(c *C) {
 }
 
 func (s *S) TestMapReduceScope(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1866,7 +2137,7 @@ func (s *S) TestMapReduceScope(c *C) {
 }
 
 func (s *S) TestMapReduceVerbose(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1888,7 +2159,7 @@ func (s *S) TestMapReduceVerbose(c *C) {
 }
 
 func (s *S) TestMapReduceLimit(c *C) {
-	session, err := mgo.Mongo("localhost:40001")
+	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1907,4 +2178,33 @@ func (s *S) TestMapReduceLimit(c *C) {
 	_, err = coll.Find(nil).Limit(3).MapReduce(job, &result)
 	c.Assert(err, IsNil)
 	c.Assert(len(result), Equals, 3)
+}
+
+func (s *S) TestBuildInfo(c *C) {
+	session, err := mgo.Dial("localhost:40001")
+	c.Assert(err, IsNil)
+	defer session.Close()
+
+	info, err := session.BuildInfo()
+	c.Assert(err, IsNil)
+
+	var v []int
+	for _, a := range strings.Split(info.Version, ".") {
+		i, err := strconv.Atoi(a)
+		c.Assert(err, IsNil)
+		v = append(v, i)
+	}
+	for len(v) < 4 {
+		v = append(v, 0)
+	}
+
+	c.Assert(info.VersionArray, Equals, v)
+	c.Assert(info.GitVersion, Matches, "[a-z0-9]+")
+	c.Assert(info.SysInfo, Matches, ".*[0-9:]+.*")
+	if info.Bits != 32 && info.Bits != 64 {
+		c.Fatalf("info.Bits is %d", info.Bits)
+	}
+	if info.MaxObjectSize < 8192 {
+		c.Fatalf("info.MaxObjectSize seems too small: %d", info.MaxObjectSize)
+	}
 }

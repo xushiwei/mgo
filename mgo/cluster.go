@@ -1,40 +1,36 @@
 // mgo - MongoDB driver for Go
 // 
-// Copyright (c) 2010-2011 - Gustavo Niemeyer <gustavo@niemeyer.net>
+// Copyright (c) 2010-2012 - Gustavo Niemeyer <gustavo@niemeyer.net>
 // 
 // All rights reserved.
-// 
+//
 // Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are met:
+// modification, are permitted provided that the following conditions are met: 
 // 
-//     * Redistributions of source code must retain the above copyright notice,
-//       this list of conditions and the following disclaimer.
-//     * Redistributions in binary form must reproduce the above copyright notice,
-//       this list of conditions and the following disclaimer in the documentation
-//       and/or other materials provided with the distribution.
-//     * Neither the name of the copyright holder nor the names of its
-//       contributors may be used to endorse or promote products derived from
-//       this software without specific prior written permission.
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer. 
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution. 
 // 
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
-// CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-// EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-// PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-// LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-// NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+// ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+// WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
+// ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+// (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+// LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+// ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 package mgo
 
 import (
+	"errors"
+	"math/rand"
 	"sync"
 	"time"
-	"os"
-	"rand"
 )
 
 // ---------------------------------------------------------------------------
@@ -60,7 +56,7 @@ type mongoCluster struct {
 
 func newCluster(userSeeds []string, direct bool) *mongoCluster {
 	cluster := &mongoCluster{userSeeds: userSeeds, references: 1, direct: direct}
-	cluster.serverSynced.L = &cluster.RWMutex
+	cluster.serverSynced.L = cluster.RWMutex.RLocker()
 	go cluster.syncServers()
 	return cluster
 }
@@ -88,7 +84,7 @@ func (cluster *mongoCluster) Release() {
 	cluster.Unlock()
 }
 
-func (cluster *mongoCluster) GetLiveServers() (servers []string) {
+func (cluster *mongoCluster) LiveServers() (servers []string) {
 	cluster.RLock()
 	for _, serv := range cluster.servers.Slice() {
 		servers = append(servers, serv.Addr)
@@ -116,7 +112,7 @@ type isMasterResult struct {
 	Passives  []string
 }
 
-func (cluster *mongoCluster) syncServer(server *mongoServer) (hosts []string, err os.Error) {
+func (cluster *mongoCluster) syncServer(server *mongoServer) (hosts []string, err error) {
 	addr := server.Addr
 	log("[sync] Processing ", addr, "...")
 
@@ -129,12 +125,12 @@ func (cluster *mongoCluster) syncServer(server *mongoServer) (hosts []string, er
 
 	socket, err := server.AcquireSocket()
 	if err != nil {
-		log("[sync] Failed to get socket to ", addr, ": ", err.String())
+		log("[sync] Failed to get socket to ", addr, ": ", err.Error())
 		return
 	}
 
 	// Monotonic will let us talk to a slave and still hold the socket.
-	session := newSession(Monotonic, cluster, socket)
+	session := newSession(Monotonic, cluster, socket, 10 * time.Second)
 	defer session.Close()
 
 	socket.Release()
@@ -142,7 +138,7 @@ func (cluster *mongoCluster) syncServer(server *mongoServer) (hosts []string, er
 	result := isMasterResult{}
 	err = session.Run("ismaster", &result)
 	if err != nil {
-		log("[sync] Command 'ismaster' to ", addr, " failed: ", err.String())
+		log("[sync] Command 'ismaster' to ", addr, " failed: ", err.Error())
 		return
 	}
 	debugf("[sync] Result of 'ismaster' from %s: %#v", addr, result)
@@ -157,6 +153,7 @@ func (cluster *mongoCluster) syncServer(server *mongoServer) (hosts []string, er
 		log("[sync] ", addr, " is a slave.")
 	} else {
 		log("[sync] ", addr, " is neither a master nor a slave.")
+		//return nil, errors.New(addr + " not a master nor slave")
 	}
 
 	hosts = make([]string, 0, 1+len(result.Hosts)+len(result.Passives))
@@ -236,7 +233,6 @@ func (cluster *mongoCluster) getKnownAddrs() []string {
 	return known
 }
 
-
 // Synchronize all servers in the cluster.  This will contact all servers in
 // parallel, ask them about known peers and their own role within the cluster,
 // and then attempt to do the same with all the peers retrieved.  This function
@@ -296,14 +292,17 @@ restart:
 
 			server, err := newServer(addr)
 			if err != nil {
-				log("[sync] Failed to start sync of ", addr, ": ", err.String())
+				log("[sync] Failed to start sync of ", addr, ": ", err.Error())
 				return
 			}
 
+			m.Lock()
 			if _, found := seen[server.ResolvedAddr]; found {
+				m.Unlock()
 				return
 			}
 			seen[server.ResolvedAddr] = true
+			m.Unlock()
 
 			hosts, err := cluster.syncServer(server)
 			if !direct && err == nil {
@@ -339,7 +338,7 @@ restart:
 	cluster.serverSynced.Broadcast()
 
 	if !direct && cluster.masters.Empty() || cluster.servers.Empty() {
-		log("[sync] No masters found. Synchronize again.")
+		log("[sync] No masters found. Will synchronize again.")
 
 		cluster.Unlock()
 		cluster.Release() // May stop resyncing with refs=0.
@@ -366,8 +365,8 @@ restart:
 // AcquireSocket returns a socket to a server in the cluster.  If slaveOk is
 // true, it will attempt to return a socket to a slave server.  If it is
 // false, the socket will necessarily be to a master server.
-func (cluster *mongoCluster) AcquireSocket(slaveOk bool, syncTimeout int64) (s *mongoSocket, err os.Error) {
-	started := time.Nanoseconds()
+func (cluster *mongoCluster) AcquireSocket(slaveOk bool, syncTimeout time.Duration) (s *mongoSocket, err error) {
+	started := time.Now()
 	for {
 		cluster.RLock()
 		for {
@@ -375,9 +374,9 @@ func (cluster *mongoCluster) AcquireSocket(slaveOk bool, syncTimeout int64) (s *
 			if !cluster.masters.Empty() || slaveOk && !cluster.slaves.Empty() {
 				break
 			}
-			if syncTimeout > 0 && time.Nanoseconds()-started > syncTimeout {
+			if syncTimeout != 0 && started.Before(time.Now().Add(-syncTimeout)) {
 				cluster.RUnlock()
-				return nil, os.NewError("no reachable servers")
+				return nil, errors.New("no reachable servers")
 			}
 			log("Waiting for servers to synchronize...")
 			if !cluster.syncing {
@@ -412,7 +411,11 @@ func (cluster *mongoCluster) CacheIndex(cacheKey string, exists bool) {
 	if cluster.cachedIndex == nil {
 		cluster.cachedIndex = make(map[string]bool)
 	}
-	cluster.cachedIndex[cacheKey] = exists, exists
+	if exists {
+		cluster.cachedIndex[cacheKey] = true
+	} else {
+		delete(cluster.cachedIndex, cacheKey)
+	}
 	cluster.Unlock()
 }
 

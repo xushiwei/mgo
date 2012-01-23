@@ -2,11 +2,12 @@ package gocheck
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"os"
 	"path"
-	"rand"
 	"reflect"
 	"regexp"
 	"runtime"
@@ -14,7 +15,6 @@ import (
 	"strings"
 	"sync"
 )
-
 
 // -----------------------------------------------------------------------
 // Internal type which deals with suite method calling.
@@ -75,7 +75,6 @@ func (c *C) stopNow() {
 	runtime.Goexit()
 }
 
-
 // -----------------------------------------------------------------------
 // Handling of temporary files and directories.
 
@@ -89,7 +88,7 @@ func (td *tempDir) newPath() string {
 	td.Lock()
 	defer td.Unlock()
 	if td._path == "" {
-		var err os.Error
+		var err error
 		for i := 0; i != 100; i++ {
 			path := fmt.Sprintf("%s/gocheck-%d", os.TempDir(), rand.Int())
 			if err = os.Mkdir(path, 0700); err == nil {
@@ -98,7 +97,7 @@ func (td *tempDir) newPath() string {
 			}
 		}
 		if td._path == "" {
-			panic("Couldn't create temporary directory: " + err.String())
+			panic("Couldn't create temporary directory: " + err.Error())
 		}
 	}
 	result := path.Join(td._path, strconv.Itoa(td._counter))
@@ -112,7 +111,7 @@ func (td *tempDir) removeAll() {
 	if td._path != "" {
 		err := os.RemoveAll(td._path)
 		if err != nil {
-			println("WARNING: Error cleaning up temporaries: " + err.String())
+			println("WARNING: Error cleaning up temporaries: " + err.Error())
 		}
 	}
 }
@@ -122,11 +121,10 @@ func (td *tempDir) removeAll() {
 func (c *C) MkDir() string {
 	path := c.tempDir.newPath()
 	if err := os.Mkdir(path, 0700); err != nil {
-		panic(fmt.Sprintf("Couldn't create temporary directory %s: %s", path, err.String()))
+		panic(fmt.Sprintf("Couldn't create temporary directory %s: %s", path, err.Error()))
 	}
 	return path
 }
-
 
 // -----------------------------------------------------------------------
 // Low-level logging functions.
@@ -151,29 +149,34 @@ func (c *C) writeLog(content string) {
 	}
 }
 
-type hasString interface {
-	String() string
+func hasStringOrError(x interface{}) (ok bool) {
+	_, ok = x.(fmt.Stringer)
+	if ok {
+		return
+	}
+	_, ok = x.(error)
+	return
 }
 
 func (c *C) logValue(label string, value interface{}) {
 	if label == "" {
-		if v, ok := value.(hasString); ok {
-			c.logf("... %#v (%q)", value, v.String())
+		if hasStringOrError(value) {
+			c.logf("... %#v (%q)", value, value)
 		} else {
 			c.logf("... %#v", value)
 		}
 	} else if value == nil {
 		c.logf("... %s = nil", label)
 	} else {
-		if v, ok := value.(hasString); ok {
+		if hasStringOrError(value) {
 			fv := fmt.Sprintf("%#v", value)
-			qv := fmt.Sprintf("%q", v.String())
+			qv := fmt.Sprintf("%q", value)
 			if fv != qv {
-				c.logf("... %s %s = %s (%s)", label, reflect.TypeOf(value).String(), fv, qv)
+				c.logf("... %s %s = %s (%s)", label, reflect.TypeOf(value), fv, qv)
 				return
 			}
 		}
-		c.logf("... %s %s = %#v", label, reflect.TypeOf(value).String(), value)
+		c.logf("... %s %s = %#v", label, reflect.TypeOf(value), value)
 	}
 }
 
@@ -219,7 +222,7 @@ func (c *C) logCode(path string, line int) {
 	if code == "" {
 		code = "..." // XXX Open the file and take the raw line.
 		if err != nil {
-			code += err.String()
+			code += err.Error()
 		}
 	}
 	c.log(indent(code, "    "))
@@ -234,7 +237,7 @@ func (c *C) logPanic(skip int, value interface{}) {
 				c.logf("... Panic: %s (PC=0x%X)\n", value, pc)
 			}
 			name := niceFuncName(pc)
-			if name == "reflect.internalValue.call" || name == "gocheck.forkTest" {
+			if name == "reflect.Value.call" || name == "gocheck.forkTest" {
 				break
 			}
 			c.logf("%s:%d\n  in %s", nicePath(file), line, name)
@@ -253,7 +256,6 @@ func (c *C) logArgPanic(method *methodType, expectedType string) {
 	c.logf("... Panic: %s argument should be %s",
 		niceFuncName(method.PC()), expectedType)
 }
-
 
 // -----------------------------------------------------------------------
 // Some simple formatting helpers.
@@ -282,8 +284,13 @@ func niceFuncName(pc uintptr) string {
 	function := runtime.FuncForPC(pc)
 	if function != nil {
 		name := path.Base(function.Name())
-		if strings.HasPrefix(name, "_xtest_.*") {
-			name = name[9:]
+		if strings.HasPrefix(name, "_xtest_.") {
+			name = name[8:]
+		}
+		if strings.HasPrefix(name, "(*") {
+			if i := strings.Index(name, ")"); i > 0 {
+				name = name[2:i] + name[i+1:]
+			}
 		}
 		if i := strings.LastIndex(name, ".*"); i != -1 {
 			name = name[0:i] + "." + name[i+2:]
@@ -296,7 +303,6 @@ func niceFuncName(pc uintptr) string {
 	return "<unknown function>"
 }
 
-
 // -----------------------------------------------------------------------
 // Result tracker to aggregate call results.
 
@@ -307,8 +313,8 @@ type Result struct {
 	Panicked         int
 	FixturePanicked  int
 	ExpectedFailures int
-	Missed           int      // Not even tried to run, related to a panic in the fixture.
-	RunError         os.Error // Houston, we've got a problem.
+	Missed           int   // Not even tried to run, related to a panic in the fixture.
+	RunError         error // Houston, we've got a problem.
 }
 
 type resultTracker struct {
@@ -397,7 +403,6 @@ func (tracker *resultTracker) _loopRoutine() {
 	}
 }
 
-
 // -----------------------------------------------------------------------
 // The underlying suite runner.
 
@@ -450,8 +455,8 @@ func newSuiteRunner(suite interface{}, runConf *RunConf) *suiteRunner {
 	var filterRegexp *regexp.Regexp
 	if filter != "" {
 		if regexp, err := regexp.Compile(filter); err != nil {
-			msg := "Bad filter expression: " + err.String()
-			runner.tracker.result.RunError = os.NewError(msg)
+			msg := "Bad filter expression: " + err.Error()
+			runner.tracker.result.RunError = errors.New(msg)
 			return runner
 		} else {
 			filterRegexp = regexp
@@ -510,7 +515,6 @@ func isWantedTest(suiteName, testName string, filterRegexp *regexp.Regexp) bool 
 		filterRegexp.MatchString(suiteName+"."+testName))
 }
 
-
 // Run all methods in the given suite.
 func (runner *suiteRunner) run() *Result {
 	if runner.tracker.result.RunError == nil && len(runner.tests) > 0 {
@@ -539,7 +543,6 @@ func (runner *suiteRunner) run() *Result {
 	}
 	return &runner.tracker.result
 }
-
 
 // Create a call object with the given suite method, and fork a
 // goroutine with the provided dispatcher for running it.
@@ -719,7 +722,6 @@ func (runner *suiteRunner) reportCallDone(c *C) {
 	}
 }
 
-
 // -----------------------------------------------------------------------
 // Output writer manages atomic output writing according to settings.
 
@@ -735,7 +737,7 @@ func newOutputWriter(writer io.Writer, stream, verbose bool) *outputWriter {
 	return &outputWriter{writer: writer, Stream: stream, Verbose: verbose}
 }
 
-func (ow *outputWriter) Write(content []byte) (n int, err os.Error) {
+func (ow *outputWriter) Write(content []byte) (n int, err error) {
 	ow.m.Lock()
 	n, err = ow.writer.Write(content)
 	ow.m.Unlock()

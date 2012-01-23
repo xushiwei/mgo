@@ -1,31 +1,27 @@
 // mgo - MongoDB driver for Go
 // 
-// Copyright (c) 2010-2011 - Gustavo Niemeyer <gustavo@niemeyer.net>
+// Copyright (c) 2010-2012 - Gustavo Niemeyer <gustavo@niemeyer.net>
 // 
 // All rights reserved.
-// 
+//
 // Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are met:
+// modification, are permitted provided that the following conditions are met: 
 // 
-//     * Redistributions of source code must retain the above copyright notice,
-//       this list of conditions and the following disclaimer.
-//     * Redistributions in binary form must reproduce the above copyright notice,
-//       this list of conditions and the following disclaimer in the documentation
-//       and/or other materials provided with the distribution.
-//     * Neither the name of the copyright holder nor the names of its
-//       contributors may be used to endorse or promote products derived from
-//       this software without specific prior written permission.
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer. 
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution. 
 // 
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
-// CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-// EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-// PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-// LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-// NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+// ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+// WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
+// ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+// (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+// LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+// ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 package mgo
@@ -33,16 +29,17 @@ package mgo
 import (
 	"crypto/md5"
 	"encoding/hex"
+	"errors"
 	"hash"
-	"launchpad.net/gobson/bson"
+	"io"
+	"launchpad.net/mgo/bson"
 	"os"
-	"runtime"
 	"sync"
 )
 
 type GridFS struct {
-	Files  Collection
-	Chunks Collection
+	Files  *Collection
+	Chunks *Collection
 }
 
 type gfsFileMode int
@@ -56,9 +53,9 @@ const (
 type GridFile struct {
 	m    sync.Mutex
 	c    sync.Cond
-	gfs  GridFS
+	gfs  *GridFS
 	mode gfsFileMode
-	err  os.Error
+	err  error
 
 	chunk  int
 	offset int64
@@ -77,11 +74,11 @@ type gfsFile struct {
 	Id          interface{}    "_id"
 	ChunkSize   int            "chunkSize"
 	UploadDate  bson.Timestamp "uploadDate"
-	Length      int64          "/s"
+	Length      int64          ",minsize"
 	MD5         string
-	Filename    string    "/c"
-	ContentType string    "contentType/c"
-	Metadata    *bson.Raw "/c"
+	Filename    string    ",omitempty"
+	ContentType string    "contentType,omitempty"
+	Metadata    *bson.Raw ",omitempty"
 }
 
 type gfsChunk struct {
@@ -95,17 +92,17 @@ type gfsCachedChunk struct {
 	wait sync.Mutex
 	n    int
 	data []byte
-	err  os.Error
+	err  error
 }
 
-func newGridFS(db Database, prefix string) *GridFS {
+func newGridFS(db *Database, prefix string) *GridFS {
 	return &GridFS{db.C(prefix + ".files"), db.C(prefix + ".chunks")}
 }
 
-func (gfs GridFS) newFile() *GridFile {
+func (gfs *GridFS) newFile() *GridFile {
 	file := &GridFile{gfs: gfs}
 	file.c.L = &file.m
-	runtime.SetFinalizer(file, finalizeFile)
+	//runtime.SetFinalizer(file, finalizeFile)
 	return file
 }
 
@@ -151,7 +148,7 @@ func finalizeFile(file *GridFile) {
 //     err = file.Close()
 //     check(err)
 //
-func (gfs GridFS) Create(name string) (file *GridFile, err os.Error) {
+func (gfs *GridFS) Create(name string) (file *GridFile, err error) {
 	file = gfs.newFile()
 	file.mode = gfsWriting
 	file.wsum = md5.New()
@@ -195,7 +192,7 @@ func (gfs GridFS) Create(name string) (file *GridFile, err os.Error) {
 //     err = file.Close()
 //     check(err)
 //
-func (gfs GridFS) OpenId(id interface{}) (file *GridFile, err os.Error) {
+func (gfs *GridFS) OpenId(id interface{}) (file *GridFile, err error) {
 	var doc gfsFile
 	err = gfs.Files.Find(bson.M{"_id": id}).One(&doc)
 	if err != nil {
@@ -216,11 +213,6 @@ func (gfs GridFS) OpenId(id interface{}) (file *GridFile, err os.Error) {
 //
 // The following example will print the first 8192 bytes from the file:
 // 
-//     func check(err os.Error) {
-//         if err != nil {
-//             panic(err.String())
-//         }
-//     }
 //     file, err := db.GridFS("fs").Open("myfile.txt")
 //     check(err)
 //     b := make([]byte, 8192)
@@ -243,7 +235,7 @@ func (gfs GridFS) OpenId(id interface{}) (file *GridFile, err os.Error) {
 //     err = file.Close()
 //     check(err)
 //
-func (gfs GridFS) Open(name string) (file *GridFile, err os.Error) {
+func (gfs *GridFS) Open(name string) (file *GridFile, err error) {
 	var doc gfsFile
 	err = gfs.Files.Find(bson.M{"filename": name}).Sort(bson.M{"uploadDate": -1}).One(&doc)
 	if err != nil {
@@ -255,8 +247,71 @@ func (gfs GridFS) Open(name string) (file *GridFile, err os.Error) {
 	return
 }
 
+// OpenNext opens the next file from iter, sets *file to it, and returns
+// true on the success case. If no more documents are available on iter or
+// an error occurred, *file is set to nil and the result is false. Errors
+// will be available on iter.Err().
+//
+// The iter parameter must be an iterator on the GridFS files collection.
+// Using the GridFS.Find method is an easy way to obtain such an iterator,
+// but any iterator on the collection will work.
+//
+// If the provided *file is non-nil, OpenNext will close it before
+// iterating to the next element. This means that in a loop one only
+// has to worry about closing files when breaking out of the loop early
+// (break, return, or panic).
+//
+// For example:
+//
+//     gfs := db.GridFS("fs")
+//     query := gfs.Find(nil).Sort(bson.M{"filename": 1})
+//     iter := query.Iter()
+//     var f *mgo.GridFile
+//     for gfs.OpenNext(iter, &f) {
+//         fmt.Printf("Filename: %s\n", f.Name())
+//     }
+//     if iter.Err() != nil {
+//         panic(iter.Err())
+//     }
+//
+func (gfs *GridFS) OpenNext(iter *Iter, file **GridFile) bool {
+	if *file != nil {
+		// Ignoring the error here shouldn't be a big deal
+		// as we're reading the file and the loop iteration
+		// for this file is finished.
+		_ = file.Close()
+	}
+	var doc gfsFile
+	if !iter.Next(&doc) {
+		*file = nil
+		return false
+	}
+	f := gfs.newFile()
+	f.mode = gfsReading
+	f.doc = doc
+	*file = f
+	return true
+}
+
+// Find runs query on GridFS's files collection and returns
+// the resulting Query.
+//
+// This logic:
+//
+//     gfs := db.GridFS("fs")
+//     iter := gfs.Find(nil).Iter()
+//
+// Is equivalent to:
+//
+//     files := db.C("fs" + ".files")
+//     iter := files.Find(nil).Iter()
+//    
+func (gfs *GridFS) Find(query interface{}) *Query {
+	return gfs.Files.Find(query)
+}
+
 // RemoveId deletes the file with the provided id from the GridFS.
-func (gfs GridFS) RemoveId(id interface{}) os.Error {
+func (gfs *GridFS) RemoveId(id interface{}) error {
 	err := gfs.Files.Remove(bson.M{"_id": id})
 	if err != nil {
 		return err
@@ -269,22 +324,16 @@ type gfsDocId struct {
 }
 
 // Remove deletes all files with the provided name from the GridFS.
-func (gfs GridFS) Remove(name string) (err os.Error) {
-	iter, err := gfs.Files.Find(bson.M{"filename": name}).Select(bson.M{"_id": 1}).Iter()
-	if err != nil {
-		return err
-	}
+func (gfs *GridFS) Remove(name string) (err error) {
+	iter := gfs.Files.Find(bson.M{"filename": name}).Select(bson.M{"_id": 1}).Iter()
 	var doc gfsDocId
-	for {
-		if e := iter.Next(&doc); e != nil {
-			if e != NotFound {
-				err = e
-			}
-			break
-		}
+	for iter.Next(&doc) {
 		if e := gfs.RemoveId(doc.Id); e != nil {
 			err = e
 		}
+	}
+	if err == nil {
+		err = iter.Err()
 	}
 	return err
 }
@@ -370,17 +419,18 @@ func (file *GridFile) SetContentType(ctype string) {
 	file.m.Unlock()
 }
 
-// GetInfo unmarshals the optional metadata associated with the file
-// into the result parameter.  For example:
+// GetMeta unmarshals the optional "metadata" field associated with the
+// file into the result parameter. The meaning of keys under that field
+// is user-defined. For example:
 //
 //     result := struct{ INode int }{}
-//     err = file.GetInfo(&result)
+//     err = file.GetMeta(&result)
 //     if err != nil {
 //         panic(err.String())
 //     }
 //     fmt.Printf("inode: %d\n", result.INode)
 //
-func (file *GridFile) GetInfo(result interface{}) (err os.Error) {
+func (file *GridFile) GetMeta(result interface{}) (err error) {
 	file.m.Lock()
 	if file.doc.Metadata != nil {
 		err = bson.Unmarshal(file.doc.Metadata.Data, result)
@@ -389,14 +439,15 @@ func (file *GridFile) GetInfo(result interface{}) (err os.Error) {
 	return
 }
 
-// SetInfo changes the optional metadata associated with the file.
+// SetMeta changes the optional "metadata" field associated with the
+// file. The meaning of keys under that field is user-defined.
 // For example:
 //
-//     file.SetInfo(bson.M{"inode": inode})
+//     file.SetMeta(bson.M{"inode": inode})
 //
 // It is a runtime error to call this function when the file is not open
 // for writing.
-func (file *GridFile) SetInfo(metadata interface{}) {
+func (file *GridFile) SetMeta(metadata interface{}) {
 	file.assertMode(gfsWriting)
 	data, err := bson.Marshal(metadata)
 	file.m.Lock()
@@ -421,13 +472,18 @@ func (file *GridFile) MD5() (md5 string) {
 	return file.doc.MD5
 }
 
+// UploadDate returns the file upload time in nanoseconds.
+func (file *GridFile) UploadDate() int64 {
+	return int64(file.doc.UploadDate)
+}
+
 // Close flushes any pending changes in case the file is being written
 // to, waits for any background operations to finish, and closes the file.
 //
 // It's important to Close files whether they are being written to
 // or read from, and to check the err result to ensure the operation
 // completed successfully.
-func (file *GridFile) Close() (err os.Error) {
+func (file *GridFile) Close() (err error) {
 	file.m.Lock()
 	defer file.m.Unlock()
 	if file.mode == gfsWriting {
@@ -454,7 +510,7 @@ func (file *GridFile) Close() (err os.Error) {
 //
 // The parameters and behavior of this function turn the file
 // into an io.Writer.
-func (file *GridFile) Write(data []byte) (n int, err os.Error) {
+func (file *GridFile) Write(data []byte) (n int, err error) {
 	file.assertMode(gfsWriting)
 	file.m.Lock()
 	debugf("GridFile %p: writing %d bytes", file, len(data))
@@ -540,7 +596,7 @@ func (file *GridFile) insertChunk(data []byte) {
 }
 
 func (file *GridFile) insertFile() {
-	hexsum := hex.EncodeToString(file.wsum.Sum())
+	hexsum := hex.EncodeToString(file.wsum.Sum(nil))
 	for file.wpending > 0 {
 		debugf("GridFile %p: waiting for %d pending chunks to insert file", file, file.wpending)
 		file.c.Wait()
@@ -553,6 +609,43 @@ func (file *GridFile) insertFile() {
 	}
 }
 
+// Seek sets the offset for the next Read or Write on file to
+// offset, interpreted according to whence: 0 means relative to
+// the origin of the file, 1 means relative to the current offset,
+// and 2 means relative to the end. It returns the new offset and
+// an Error, if any.
+func (file *GridFile) Seek(offset int64, whence int) (pos int64, err error) {
+	file.m.Lock()
+	debugf("GridFile %p: seeking for %s (whence=%d)", file, offset, whence)
+	defer file.m.Unlock()
+	switch whence {
+	case os.SEEK_SET:
+	case os.SEEK_CUR:
+		offset += file.offset
+	case os.SEEK_END:
+		offset += file.doc.Length
+	default:
+		panic("Unsupported whence value")
+	}
+	if offset > file.doc.Length {
+		return file.offset, errors.New("Seek past end of file")
+	}
+	chunk := int(offset / int64(file.doc.ChunkSize))
+	if chunk+1 == file.chunk && offset >= file.offset {
+		file.rbuf = file.rbuf[int(offset-file.offset):]
+		file.offset = offset
+		return file.offset, nil
+	}
+	file.offset = offset
+	file.chunk = chunk
+	file.rbuf = nil
+	file.rbuf, err = file.getChunk()
+	if err == nil {
+		file.rbuf = file.rbuf[int(file.offset-int64(chunk)*int64(file.doc.ChunkSize)):]
+	}
+	return file.offset, err
+}
+
 // Read reads into b the next available data from the file and
 // returns the number of bytes written and an error in case
 // something wrong happened.  At the end of the file, n will
@@ -560,13 +653,13 @@ func (file *GridFile) insertFile() {
 //
 // The parameters and behavior of this function turn the file
 // into an io.Reader.
-func (file *GridFile) Read(b []byte) (n int, err os.Error) {
+func (file *GridFile) Read(b []byte) (n int, err error) {
 	file.assertMode(gfsReading)
 	file.m.Lock()
 	debugf("GridFile %p: reading at offset %d into buffer of length %d", file, file.offset, len(b))
 	defer file.m.Unlock()
 	if file.offset == file.doc.Length {
-		return 0, os.EOF
+		return 0, io.EOF
 	}
 	for err == nil {
 		i := copy(b, file.rbuf)
@@ -582,7 +675,7 @@ func (file *GridFile) Read(b []byte) (n int, err os.Error) {
 	return n, err
 }
 
-func (file *GridFile) getChunk() (data []byte, err os.Error) {
+func (file *GridFile) getChunk() (data []byte, err error) {
 	cache := file.rcache
 	file.rcache = nil
 	if cache != nil && cache.n == file.chunk {
@@ -601,9 +694,14 @@ func (file *GridFile) getChunk() (data []byte, err os.Error) {
 		cache = &gfsCachedChunk{n: file.chunk}
 		cache.wait.Lock()
 		debugf("GridFile %p: Scheduling chunk %d for background caching", file, file.chunk)
+		// Clone the session to avoid having it closed in between.
+		chunks := file.gfs.Chunks
+		session := chunks.Database.Session.Clone()
 		go func(id interface{}, n int) {
+			defer session.Close()
+			chunks = chunks.With(session)
 			var doc gfsChunk
-			cache.err = file.gfs.Chunks.Find(bson.D{{"files_id", id}, {"n", n}}).One(&doc)
+			cache.err = chunks.Find(bson.D{{"files_id", id}, {"n", n}}).One(&doc)
 			cache.data = doc.Data
 			cache.wait.Unlock()
 		}(file.doc.Id, file.chunk)

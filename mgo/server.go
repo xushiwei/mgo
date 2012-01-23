@@ -1,40 +1,35 @@
 // mgo - MongoDB driver for Go
 // 
-// Copyright (c) 2010-2011 - Gustavo Niemeyer <gustavo@niemeyer.net>
+// Copyright (c) 2010-2012 - Gustavo Niemeyer <gustavo@niemeyer.net>
 // 
 // All rights reserved.
-// 
+//
 // Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are met:
+// modification, are permitted provided that the following conditions are met: 
 // 
-//     * Redistributions of source code must retain the above copyright notice,
-//       this list of conditions and the following disclaimer.
-//     * Redistributions in binary form must reproduce the above copyright notice,
-//       this list of conditions and the following disclaimer in the documentation
-//       and/or other materials provided with the distribution.
-//     * Neither the name of the copyright holder nor the names of its
-//       contributors may be used to endorse or promote products derived from
-//       this software without specific prior written permission.
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer. 
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution. 
 // 
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
-// CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-// EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-// PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-// LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-// NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+// ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+// WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
+// ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+// (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+// LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+// ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 package mgo
 
 import (
-	"sync"
-	"sort"
 	"net"
-	"os"
+	"sort"
+	"sync"
 )
 
 // ---------------------------------------------------------------------------
@@ -50,11 +45,10 @@ type mongoServer struct {
 	master       bool
 }
 
-
-func newServer(addr string) (server *mongoServer, err os.Error) {
+func newServer(addr string) (server *mongoServer, err error) {
 	tcpaddr, err := net.ResolveTCPAddr("tcp", addr)
 	if err != nil {
-		log("Failed to resolve ", addr, ": ", err.String())
+		log("Failed to resolve ", addr, ": ", err.Error())
 		return nil, err
 	}
 
@@ -66,12 +60,11 @@ func newServer(addr string) (server *mongoServer, err os.Error) {
 	return
 }
 
-
 // Obtain a socket for communicating with the server.  This will attempt to
 // reuse an old connection, if one is available. Otherwise, it will establish
 // a new one. The returned socket is owned by the call site, and will return
 // to the cache if explicitly done.
-func (server *mongoServer) AcquireSocket() (socket *mongoSocket, err os.Error) {
+func (server *mongoServer) AcquireSocket() (socket *mongoSocket, err error) {
 	for {
 		server.Lock()
 		n := len(server.sockets)
@@ -95,7 +88,7 @@ func (server *mongoServer) AcquireSocket() (socket *mongoSocket, err os.Error) {
 
 // Establish a new connection to the server. This should generally be done
 // through server.getSocket().
-func (server *mongoServer) Connect() (*mongoSocket, os.Error) {
+func (server *mongoServer) Connect() (*mongoSocket, error) {
 	server.RLock()
 	addr := server.Addr
 	tcpaddr := server.tcpaddr
@@ -105,7 +98,7 @@ func (server *mongoServer) Connect() (*mongoSocket, os.Error) {
 	log("Establishing new connection to ", addr, "...")
 	conn, err := net.DialTCP("tcp", nil, tcpaddr)
 	if err != nil {
-		log("Connection to ", addr, " failed: ", err.String())
+		log("Connection to ", addr, " failed: ", err.Error())
 		return nil, err
 	}
 	log("Connection to ", addr, " established.")
@@ -184,7 +177,6 @@ func (s mongoServerSlice) Search(other *mongoServer) (i int, ok bool) {
 	})
 	return i, i != n && s[i].ResolvedAddr == resolvedAddr
 }
-
 
 type mongoServers struct {
 	slice mongoServerSlice

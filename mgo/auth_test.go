@@ -1,31 +1,27 @@
 // mgo - MongoDB driver for Go
 // 
-// Copyright (c) 2010-2011 - Gustavo Niemeyer <gustavo@niemeyer.net>
+// Copyright (c) 2010-2012 - Gustavo Niemeyer <gustavo@niemeyer.net>
 // 
 // All rights reserved.
-// 
+//
 // Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are met:
+// modification, are permitted provided that the following conditions are met: 
 // 
-//     * Redistributions of source code must retain the above copyright notice,
-//       this list of conditions and the following disclaimer.
-//     * Redistributions in binary form must reproduce the above copyright notice,
-//       this list of conditions and the following disclaimer in the documentation
-//       and/or other materials provided with the distribution.
-//     * Neither the name of the copyright holder nor the names of its
-//       contributors may be used to endorse or promote products derived from
-//       this software without specific prior written permission.
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer. 
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution. 
 // 
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
-// CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-// EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-// PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-// LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-// NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+// ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+// WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
+// ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+// (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+// LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+// ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 package mgo_test
@@ -37,18 +33,18 @@ import (
 )
 
 func (s *S) TestAuthLogin(c *C) {
-	session, err := mgo.Mongo("localhost:40002")
+	session, err := mgo.Dial("localhost:40002")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
 	coll := session.DB("mydb").C("mycoll")
 	err = coll.Insert(M{"n": 1})
-	c.Assert(err, Matches, "unauthorized")
+	c.Assert(err, ErrorMatches, "unauthorized")
 
 	admindb := session.DB("admin")
 
 	err = admindb.Login("root", "wrong")
-	c.Assert(err, Matches, "auth fails")
+	c.Assert(err, ErrorMatches, "auth fails")
 
 	err = admindb.Login("root", "rapadura")
 	c.Assert(err, IsNil)
@@ -58,7 +54,7 @@ func (s *S) TestAuthLogin(c *C) {
 }
 
 func (s *S) TestAuthLoginLogout(c *C) {
-	session, err := mgo.Mongo("localhost:40002")
+	session, err := mgo.Dial("localhost:40002")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -70,7 +66,7 @@ func (s *S) TestAuthLoginLogout(c *C) {
 
 	coll := session.DB("mydb").C("mycoll")
 	err = coll.Insert(M{"n": 1})
-	c.Assert(err, Matches, "unauthorized")
+	c.Assert(err, ErrorMatches, "unauthorized")
 
 	// Must have dropped auth from the session too.
 	session = session.Copy()
@@ -78,11 +74,11 @@ func (s *S) TestAuthLoginLogout(c *C) {
 
 	coll = session.DB("mydb").C("mycoll")
 	err = coll.Insert(M{"n": 1})
-	c.Assert(err, Matches, "unauthorized")
+	c.Assert(err, ErrorMatches, "unauthorized")
 }
 
 func (s *S) TestAuthLoginLogoutAll(c *C) {
-	session, err := mgo.Mongo("localhost:40002")
+	session, err := mgo.Dial("localhost:40002")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -94,7 +90,7 @@ func (s *S) TestAuthLoginLogoutAll(c *C) {
 
 	coll := session.DB("mydb").C("mycoll")
 	err = coll.Insert(M{"n": 1})
-	c.Assert(err, Matches, "unauthorized")
+	c.Assert(err, ErrorMatches, "unauthorized")
 
 	// Must have dropped auth from the session too.
 	session = session.Copy()
@@ -102,11 +98,11 @@ func (s *S) TestAuthLoginLogoutAll(c *C) {
 
 	coll = session.DB("mydb").C("mycoll")
 	err = coll.Insert(M{"n": 1})
-	c.Assert(err, Matches, "unauthorized")
+	c.Assert(err, ErrorMatches, "unauthorized")
 }
 
 func (s *S) TestAuthAddUser(c *C) {
-	session, err := mgo.Mongo("localhost:40002")
+	session, err := mgo.Dial("localhost:40002")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -127,7 +123,7 @@ func (s *S) TestAuthAddUser(c *C) {
 
 	coll := session.DB("mydb").C("mycoll")
 	err = coll.Insert(M{"n": 1})
-	c.Assert(err, Matches, "unauthorized")
+	c.Assert(err, ErrorMatches, "unauthorized")
 
 	err = mydb.Login("mywuser", "mypass")
 	c.Assert(err, IsNil)
@@ -137,7 +133,7 @@ func (s *S) TestAuthAddUser(c *C) {
 }
 
 func (s *S) TestAuthAddUserReplaces(c *C) {
-	session, err := mgo.Mongo("localhost:40002")
+	session, err := mgo.Dial("localhost:40002")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -154,17 +150,17 @@ func (s *S) TestAuthAddUserReplaces(c *C) {
 	admindb.Logout()
 
 	err = mydb.Login("myuser", "myoldpass")
-	c.Assert(err, Matches, "auth fails")
+	c.Assert(err, ErrorMatches, "auth fails")
 	err = mydb.Login("myuser", "mynewpass")
 	c.Assert(err, IsNil)
 
 	// ReadOnly flag was changed too.
 	err = mydb.C("mycoll").Insert(M{"n": 1})
-	c.Assert(err, Matches, "unauthorized")
+	c.Assert(err, ErrorMatches, "unauthorized")
 }
 
 func (s *S) TestAuthRemoveUser(c *C) {
-	session, err := mgo.Mongo("localhost:40002")
+	session, err := mgo.Dial("localhost:40002")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -179,11 +175,11 @@ func (s *S) TestAuthRemoveUser(c *C) {
 	c.Assert(err, IsNil)
 
 	err = mydb.Login("myuser", "mypass")
-	c.Assert(err, Matches, "auth fails")
+	c.Assert(err, ErrorMatches, "auth fails")
 }
 
 func (s *S) TestAuthLoginTwiceDoesNothing(c *C) {
-	session, err := mgo.Mongo("localhost:40002")
+	session, err := mgo.Dial("localhost:40002")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -201,7 +197,7 @@ func (s *S) TestAuthLoginTwiceDoesNothing(c *C) {
 }
 
 func (s *S) TestAuthLoginLogoutLoginDoesNothing(c *C) {
-	session, err := mgo.Mongo("localhost:40002")
+	session, err := mgo.Dial("localhost:40002")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -220,7 +216,7 @@ func (s *S) TestAuthLoginLogoutLoginDoesNothing(c *C) {
 }
 
 func (s *S) TestAuthLoginSwitchUser(c *C) {
-	session, err := mgo.Mongo("localhost:40002")
+	session, err := mgo.Dial("localhost:40002")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -237,7 +233,7 @@ func (s *S) TestAuthLoginSwitchUser(c *C) {
 
 	// Can't write.
 	err = coll.Insert(M{"n": 1})
-	c.Assert(err, Matches, "unauthorized")
+	c.Assert(err, ErrorMatches, "unauthorized")
 
 	// But can read.
 	result := struct{ N int }{}
@@ -247,7 +243,7 @@ func (s *S) TestAuthLoginSwitchUser(c *C) {
 }
 
 func (s *S) TestAuthLoginChangePassword(c *C) {
-	session, err := mgo.Mongo("localhost:40002")
+	session, err := mgo.Dial("localhost:40002")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -272,11 +268,11 @@ func (s *S) TestAuthLoginChangePassword(c *C) {
 
 	// The second login must be in effect, which means read-only.
 	err = mydb.C("mycoll").Insert(M{"n": 1})
-	c.Assert(err, Matches, "unauthorized")
+	c.Assert(err, ErrorMatches, "unauthorized")
 }
 
 func (s *S) TestAuthLoginCachingWithSessionRefresh(c *C) {
-	session, err := mgo.Mongo("localhost:40002")
+	session, err := mgo.Dial("localhost:40002")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -292,7 +288,7 @@ func (s *S) TestAuthLoginCachingWithSessionRefresh(c *C) {
 }
 
 func (s *S) TestAuthLoginCachingWithSessionCopy(c *C) {
-	session, err := mgo.Mongo("localhost:40002")
+	session, err := mgo.Dial("localhost:40002")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -309,7 +305,7 @@ func (s *S) TestAuthLoginCachingWithSessionCopy(c *C) {
 }
 
 func (s *S) TestAuthLoginCachingWithSessionClone(c *C) {
-	session, err := mgo.Mongo("localhost:40002")
+	session, err := mgo.Dial("localhost:40002")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -326,7 +322,7 @@ func (s *S) TestAuthLoginCachingWithSessionClone(c *C) {
 }
 
 func (s *S) TestAuthLoginCachingWithNewSession(c *C) {
-	session, err := mgo.Mongo("localhost:40002")
+	session, err := mgo.Dial("localhost:40002")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -339,14 +335,14 @@ func (s *S) TestAuthLoginCachingWithNewSession(c *C) {
 
 	coll := session.DB("mydb").C("mycoll")
 	err = coll.Insert(M{"n": 1})
-	c.Assert(err, Matches, "unauthorized")
+	c.Assert(err, ErrorMatches, "unauthorized")
 }
 
 func (s *S) TestAuthLoginCachingAcrossPool(c *C) {
 	// Logins are cached even when the conenction goes back
 	// into the pool.
 
-	session, err := mgo.Mongo("localhost:40002")
+	session, err := mgo.Dial("localhost:40002")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -397,7 +393,7 @@ func (s *S) TestAuthLoginCachingAcrossPoolWithLogout(c *C) {
 	// Now verify that logouts are properly flushed if they
 	// are not revalidated after leaving the pool.
 
-	session, err := mgo.Mongo("localhost:40002")
+	session, err := mgo.Dial("localhost:40002")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -436,7 +432,7 @@ func (s *S) TestAuthLoginCachingAcrossPoolWithLogout(c *C) {
 	// Can't write, since root has been implicitly logged out
 	// when the collection went into the pool, and not revalidated.
 	err = other.DB("mydb").C("mycoll").Insert(M{"n": 1})
-	c.Assert(err, Matches, "unauthorized")
+	c.Assert(err, ErrorMatches, "unauthorized")
 
 	// But can read due to the revalidated myuser login.
 	result := struct{ N int }{}
@@ -448,7 +444,7 @@ func (s *S) TestAuthLoginCachingAcrossPoolWithLogout(c *C) {
 func (s *S) TestAuthEventual(c *C) {
 	// Eventual sessions don't keep sockets around, so they are
 	// an interesting test case.
-	session, err := mgo.Mongo("localhost:40002")
+	session, err := mgo.Dial("localhost:40002")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -462,11 +458,11 @@ func (s *S) TestAuthEventual(c *C) {
 	var wg sync.WaitGroup
 	wg.Add(20)
 
-	result := struct{ N int }{}
 	for i := 0; i != 10; i++ {
 		go func() {
 			defer wg.Done()
-			err = session.DB("mydb").C("mycoll").Find(nil).One(&result)
+			var result struct{ N int }
+			err := session.DB("mydb").C("mycoll").Find(nil).One(&result)
 			c.Assert(err, IsNil)
 			c.Assert(result.N, Equals, 1)
 		}()
@@ -475,7 +471,7 @@ func (s *S) TestAuthEventual(c *C) {
 	for i := 0; i != 10; i++ {
 		go func() {
 			defer wg.Done()
-			err = session.DB("mydb").C("mycoll").Insert(M{"n": 1})
+			err := session.DB("mydb").C("mycoll").Insert(M{"n": 1})
 			c.Assert(err, IsNil)
 		}()
 	}
@@ -484,7 +480,7 @@ func (s *S) TestAuthEventual(c *C) {
 }
 
 func (s *S) TestAuthURL(c *C) {
-	session, err := mgo.Mongo("mongodb://root:rapadura@localhost:40002/")
+	session, err := mgo.Dial("mongodb://root:rapadura@localhost:40002/")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -493,18 +489,18 @@ func (s *S) TestAuthURL(c *C) {
 }
 
 func (s *S) TestAuthURLWrongCredentials(c *C) {
-	session, err := mgo.Mongo("mongodb://root:wrong@localhost:40002/")
-	c.Assert(err, IsNil)
-	defer session.Close()
-
-	err = session.DB("mydb").C("mycoll").Insert(M{"n": 1})
-	c.Assert(err, Matches, "auth fails")
+	session, err := mgo.Dial("mongodb://root:wrong@localhost:40002/")
+	if session != nil {
+		session.Close()
+	}
+	c.Assert(err, ErrorMatches, "auth fails")
+	c.Assert(session, IsNil)
 }
 
 func (s *S) TestAuthURLWithNewSession(c *C) {
 	// When authentication is in the URL, the new session will
 	// actually carry it on as well, even if logged out explicitly.
-	session, err := mgo.Mongo("mongodb://root:rapadura@localhost:40002/")
+	session, err := mgo.Dial("mongodb://root:rapadura@localhost:40002/")
 	c.Assert(err, IsNil)
 	defer session.Close()
 

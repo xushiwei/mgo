@@ -1,39 +1,36 @@
-// gobson - BSON library for Go.
+// BSON library for Go
 // 
-// Copyright (c) 2010-2011 - Gustavo Niemeyer <gustavo@niemeyer.net>
+// Copyright (c) 2010-2012 - Gustavo Niemeyer <gustavo@niemeyer.net>
 // 
 // All rights reserved.
-// 
+//
 // Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are met:
+// modification, are permitted provided that the following conditions are met: 
 // 
-//     * Redistributions of source code must retain the above copyright notice,
-//       this list of conditions and the following disclaimer.
-//     * Redistributions in binary form must reproduce the above copyright notice,
-//       this list of conditions and the following disclaimer in the documentation
-//       and/or other materials provided with the distribution.
-//     * Neither the name of the copyright holder nor the names of its
-//       contributors may be used to endorse or promote products derived from
-//       this software without specific prior written permission.
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer. 
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution. 
 // 
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
-// CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-// EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-// PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-// LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-// NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+// ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+// WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
+// ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+// (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+// LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+// ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// gobson - BSON library for Go.
 
 package bson
 
 import (
-	"strconv"
-	"reflect"
 	"math"
+	"reflect"
+	"strconv"
 )
 
 // --------------------------------------------------------------------------
@@ -77,7 +74,6 @@ func itoa(i int) string {
 	}
 	return strconv.Itoa(i)
 }
-
 
 // --------------------------------------------------------------------------
 // Marshaling of the document value itself.
@@ -132,16 +128,21 @@ func (e *encoder) addMap(v reflect.Value) {
 }
 
 func (e *encoder) addStruct(v reflect.Value) {
-	fields, err := getStructFields(v.Type())
+	sinfo, err := getStructInfo(v.Type())
 	if err != nil {
 		panic(err)
 	}
-	for i, info := range fields.List {
-		value := v.Field(i)
-		if info.Conditional && isZero(value) {
+	var value reflect.Value
+	for _, info := range sinfo.FieldsList {
+		if info.Inline == nil {
+			value = v.Field(info.Num)
+		} else {
+			value = v.FieldByIndex(info.Inline)
+		}
+		if info.OmitEmpty && isZero(value) {
 			continue
 		}
-		e.addElem(info.Key, value, info.Short)
+		e.addElem(info.Key, value, info.MinSize)
 	}
 }
 
@@ -177,7 +178,6 @@ func (e *encoder) addSlice(v reflect.Value) {
 	}
 }
 
-
 // --------------------------------------------------------------------------
 // Marshaling of elements in a document.
 
@@ -187,7 +187,7 @@ func (e *encoder) addElemName(kind byte, name string) {
 	e.addBytes(0)
 }
 
-func (e *encoder) addElem(name string, v reflect.Value, short bool) {
+func (e *encoder) addElem(name string, v reflect.Value, minSize bool) {
 
 	if !v.IsValid() {
 		e.addElemName('\x0A', name)
@@ -195,17 +195,17 @@ func (e *encoder) addElem(name string, v reflect.Value, short bool) {
 	}
 
 	if getter, ok := v.Interface().(Getter); ok {
-		e.addElem(name, reflect.ValueOf(getter.GetBSON()), short)
+		e.addElem(name, reflect.ValueOf(getter.GetBSON()), minSize)
 		return
 	}
 
 	switch v.Kind() {
 
 	case reflect.Interface:
-		e.addElem(name, v.Elem(), short)
+		e.addElem(name, v.Elem(), minSize)
 
 	case reflect.Ptr:
-		e.addElem(name, v.Elem(), short)
+		e.addElem(name, v.Elem(), minSize)
 
 	case reflect.String:
 		s := v.String()
@@ -237,7 +237,7 @@ func (e *encoder) addElem(name string, v reflect.Value, short bool) {
 		u := v.Uint()
 		if int64(u) < 0 {
 			panic("BSON has no uint64 type, and value is too large to fit correctly in an int64")
-		} else if u <= math.MaxInt32 && (short || v.Kind() <= reflect.Uint32) {
+		} else if u <= math.MaxInt32 && (minSize || v.Kind() <= reflect.Uint32) {
 			e.addElemName('\x10', name)
 			e.addInt32(int32(u))
 		} else {
@@ -271,7 +271,7 @@ func (e *encoder) addElem(name string, v reflect.Value, short bool) {
 
 			default:
 				i := v.Int()
-				if short && i >= math.MinInt32 && i <= math.MaxInt32 {
+				if minSize && i >= math.MinInt32 && i <= math.MaxInt32 {
 					// It fits into an int32, encode as such.
 					e.addElemName('\x10', name)
 					e.addInt32(int32(i))
@@ -298,9 +298,8 @@ func (e *encoder) addElem(name string, v reflect.Value, short bool) {
 		vt := v.Type()
 		et := vt.Elem()
 		if et.Kind() == reflect.Uint8 {
-			// FIXME: This breaks down with custom types based on []byte
 			e.addElemName('\x05', name)
-			e.addBinary('\x00', v.Interface().([]byte))
+			e.addBinary('\x00', v.Bytes())
 		} else if et == typeDocElem {
 			e.addElemName('\x03', name)
 			e.addDoc(v)
@@ -363,7 +362,6 @@ func (e *encoder) addElem(name string, v reflect.Value, short bool) {
 		panic("Can't marshal " + v.Type().String() + " in a BSON document")
 	}
 }
-
 
 // --------------------------------------------------------------------------
 // Marshaling of base types.
