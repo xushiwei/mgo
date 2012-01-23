@@ -1,6 +1,6 @@
 include $(GOROOT)/src/Make.inc
 
-TARG=launchpad.net/gobson/bson
+TARG=launchpad.net/mgo/bson
 
 GOFILES=\
 	gobson.go\
