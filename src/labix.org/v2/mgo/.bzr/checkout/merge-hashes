@@ -1,0 +1,12 @@
+BZR merge-modified list format 1
+file_id: flusher.go-20120822122228-dsg409nqr1o2tlbw-6
+hash: cd62494bc3d521732f2ecd914c377ebac1509e9f
+
+file_id: gobson.go-20120121202541-k0gsuf6mago5b16v-4
+hash: 0dac5f8bffe2c7397cfe95a1084e52405f7ca42a
+
+file_id: gobson_test.go-20120121202541-k0gsuf6mago5b16v-5
+hash: de4c3233aa338cdfddf641ab1710a0764573fe7d
+
+file_id: decode.go-20120121202541-k0gsuf6mago5b16v-2
+hash: 8542d46f2cf89485dcdf55c926a4e5f732e84440
